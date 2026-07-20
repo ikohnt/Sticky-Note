@@ -1,0 +1,38 @@
+[package]
+name = "sticky-notes"
+version = "0.1.0"
+description = "A lightweight desktop sticky notes app built with Tauri."
+authors = ["Hendriko"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# The application logic lives in a library so it can be shared with the
+# (optional) mobile entry point and kept testable.
+[lib]
+name = "sticky_notes_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+note-store = { path = "note-store" }
+
+# A Cargo workspace lets `cargo test -p note-store` run the pure-logic tests
+# without compiling the (heavier) Tauri/webview dependencies.
+[workspace]
+members = [".", "note-store"]
+
+# Smaller, faster release binaries.
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

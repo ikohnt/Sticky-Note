@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sticky Note</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="color-yellow">
+    <!-- The toolbar is the drag handle (frameless window) -->
+    <header class="toolbar" data-tauri-drag-region>
+      <div class="swatches">
+        <button class="swatch s-yellow" data-color="yellow" title="Yellow"></button>
+        <button class="swatch s-pink" data-color="pink" title="Pink"></button>
+        <button class="swatch s-blue" data-color="blue" title="Blue"></button>
+        <button class="swatch s-green" data-color="green" title="Green"></button>
+        <button class="swatch s-purple" data-color="purple" title="Purple"></button>
+      </div>
+      <div class="actions">
+        <button id="new-note" class="icon-btn" title="New note (Ctrl+Alt+N)" aria-label="New note">+</button>
+        <button id="delete-note" class="icon-btn danger" title="Delete this note" aria-label="Delete note">×</button>
+      </div>
+    </header>
+
+    <textarea id="content" spellcheck="true" placeholder="Write something…"></textarea>
+
+    <div id="resize-handle" title="Drag to resize" aria-hidden="true"></div>
+
+    <script src="main.js"></script>
+  </body>
+</html>
