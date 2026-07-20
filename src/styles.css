@@ -1,0 +1,137 @@
+/* Sticky note window styling. The window itself is frameless; this fills it. */
+
+:root {
+  --note: #fff7b0;
+  --header: #ffe970;
+  --ink: #3a3320;
+  --shadow: rgba(0, 0, 0, 0.25);
+}
+
+/* Color themes — applied by toggling a class on <body>. */
+.color-yellow { --note: #fff7b0; --header: #ffe970; --ink: #4a4212; }
+.color-pink   { --note: #ffd7e0; --header: #ff9db2; --ink: #5a2233; }
+.color-blue   { --note: #d4ecff; --header: #6fb7ff; --ink: #123a5a; }
+.color-green  { --note: #d8f5df; --header: #7bd88f; --ink: #14512a; }
+.color-purple { --note: #ece0ff; --header: #c19bff; --ink: #35205a; }
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  background: var(--note);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--ink);
+  user-select: none;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--header);
+  cursor: grab;
+  flex: 0 0 auto;
+}
+.toolbar:active { cursor: grabbing; }
+
+/* Buttons must not trigger window-drag, so let them receive their own clicks. */
+.toolbar button { -webkit-app-region: no-drag; }
+
+.swatches {
+  display: flex;
+  gap: 6px;
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.08s ease;
+}
+.swatch:hover { transform: scale(1.18); }
+
+/* Fixed preview colors for the swatch buttons (independent of note theme). */
+.s-yellow { background: #ffd833; }
+.s-pink { background: #ff9db2; }
+.s-blue { background: #6fb7ff; }
+.s-green { background: #7bd88f; }
+.s-purple { background: #c19bff; }
+
+.actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  width: 22px;
+  height: 22px;
+  line-height: 20px;
+  text-align: center;
+  border: none;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.35);
+  color: var(--ink);
+  font-size: 17px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.icon-btn:hover { background: rgba(255, 255, 255, 0.7); }
+.icon-btn.danger:hover { background: rgba(220, 40, 40, 0.85); color: #fff; }
+
+#content {
+  flex: 1 1 auto;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 12px 14px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.45;
+  font-family: inherit;
+  user-select: text;
+}
+#content::placeholder { color: color-mix(in srgb, var(--ink) 45%, transparent); }
+
+/* Bottom-right resize grip for the frameless window. */
+#resize-handle {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 0 50%,
+    color-mix(in srgb, var(--ink) 35%, transparent) 50% 60%,
+    transparent 60% 72%,
+    color-mix(in srgb, var(--ink) 35%, transparent) 72% 82%,
+    transparent 82%
+  );
+}
+
+/* Thin scrollbar that matches the note. */
+#content::-webkit-scrollbar { width: 8px; }
+#content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ink) 25%, transparent);
+  border-radius: 4px;
+}
