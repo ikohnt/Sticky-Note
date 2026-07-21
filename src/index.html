@@ -17,14 +17,79 @@
         <button class="swatch s-purple" data-color="purple" title="Purple"></button>
       </div>
       <div class="actions">
+        <button id="lock-note" class="icon-btn" title="Protect this note" aria-label="Protect note">🔓</button>
+        <button id="attach-note" class="icon-btn" title="Attach image" aria-label="Attach image">🖼</button>
+        <button id="open-library" class="icon-btn" title="Open library" aria-label="Open library">☰</button>
         <button id="new-note" class="icon-btn" title="New note (Ctrl+Alt+N)" aria-label="New note">+</button>
         <button id="delete-note" class="icon-btn danger" title="Delete this note" aria-label="Delete note">×</button>
       </div>
     </header>
 
+    <!-- Group badge (shown only when the note belongs to a collection) -->
+    <div id="group-badge" class="group-badge" hidden></div>
+
+    <!-- Image attachments (sidecar files); hidden until the note has any -->
+    <div id="attachments" class="attachments" hidden></div>
+
     <textarea id="content" spellcheck="true" placeholder="Write something…"></textarea>
 
+    <footer class="statusbar" aria-hidden="false">
+      <span id="timestamp" class="timestamp" title=""></span>
+      <label class="opacity" title="Note opacity">
+        <span class="opacity-icon" aria-hidden="true">◐</span>
+        <input id="opacity" type="range" min="30" max="100" step="5" value="100"
+               aria-label="Note opacity" />
+      </label>
+    </footer>
+
     <div id="resize-handle" title="Drag to resize" aria-hidden="true"></div>
+
+    <!-- Locked overlay: shown when a protected note is locked -->
+    <div id="lock-overlay" class="modal" hidden>
+      <div class="modal-card">
+        <p class="modal-title">🔒 Locked note</p>
+        <p class="modal-reason">Enter the master password to view this note.</p>
+        <input id="unlock-input" class="pw-input" type="password" placeholder="Master password"
+               autocomplete="current-password" />
+        <p id="unlock-error" class="pw-error" hidden>Wrong password — try again.</p>
+        <div class="modal-actions">
+          <button id="unlock-btn" class="btn primary">Unlock</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Create master password (first time protecting any note) -->
+    <div id="master-overlay" class="modal" hidden>
+      <div class="modal-card">
+        <p class="modal-title">Set a master password</p>
+        <p class="modal-reason">
+          One password protects all your protected notes. It is never stored, so
+          there is no way to recover a forgotten password.
+        </p>
+        <input id="master-new" class="pw-input" type="password" placeholder="New master password"
+               autocomplete="new-password" />
+        <input id="master-confirm" class="pw-input" type="password" placeholder="Confirm password"
+               autocomplete="new-password" />
+        <p id="master-error" class="pw-error" hidden></p>
+        <div class="modal-actions">
+          <button id="master-create" class="btn primary">Create &amp; protect</button>
+          <button id="master-cancel" class="btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Smart Duplicate Detection prompt -->
+    <div id="dup-modal" class="modal" hidden>
+      <div class="modal-card">
+        <p class="modal-title">Similar note found</p>
+        <p id="dup-reason" class="modal-reason"></p>
+        <div class="modal-actions">
+          <button id="dup-merge" class="btn primary">Merge</button>
+          <button id="dup-keep" class="btn">Keep both</button>
+          <button id="dup-show" class="btn">Show existing</button>
+        </div>
+      </div>
+    </div>
 
     <script src="main.js"></script>
   </body>

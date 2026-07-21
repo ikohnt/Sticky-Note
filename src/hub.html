@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sticky Notes — Library</title>
+    <link rel="stylesheet" href="hub.css" />
+  </head>
+  <body>
+    <header class="hub-header">
+      <h1>Library</h1>
+      <span id="note-count" class="note-count"></span>
+    </header>
+
+    <section class="panel">
+      <button id="surprise-btn" class="hub-btn primary">✨ Surprise me</button>
+      <div id="surprise-out" class="surprise-out" hidden></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Smart Organization</h2>
+        <button id="organize-btn" class="hub-btn small">Suggest groups</button>
+      </div>
+      <p class="hint">
+        Finds clusters of similar notes so you can file them into a collection.
+        Runs entirely on your machine — no note ever leaves your device.
+      </p>
+      <div id="clusters"></div>
+      <p id="organize-empty" class="empty" hidden></p>
+    </section>
+
+    <script src="hub.js"></script>
+  </body>
+</html>
