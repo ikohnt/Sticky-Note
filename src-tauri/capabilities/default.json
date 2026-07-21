@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions granted to sticky note windows: drag, resize, geometry read-back, focus and close.",
+  "description": "Permissions granted to sticky note windows: drag, resize, geometry read-back, focus, close and attaching images.",
   "windows": ["note-*"],
   "permissions": [
     "core:default",
@@ -13,6 +13,7 @@
     "core:window:allow-hide",
     "core:window:allow-scale-factor",
     "core:window:allow-outer-position",
-    "core:window:allow-inner-size"
+    "core:window:allow-inner-size",
+    "dialog:allow-open"
   ]
 }

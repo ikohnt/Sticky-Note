@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hub",
+  "description": "Permissions for the Library Hub window: it invokes the app's own commands (Surprise Me, Smart Organization) and manages its own window.",
+  "windows": ["hub"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-set-focus"
+  ]
+}

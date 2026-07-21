@@ -1,0 +1,137 @@
+/* Library Hub window. A normal (decorated) window, unlike the frameless notes. */
+
+:root {
+  --bg: #faf7ef;
+  --card: #fffdf6;
+  --ink: #3a3320;
+  --muted: #7a7360;
+  --line: #e6e0cf;
+  --accent: #e0a800;
+  --shadow: rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #262320;
+    --card: #302c27;
+    --ink: #ece7db;
+    --muted: #a49c8a;
+    --line: #443f38;
+    --accent: #ffd24a;
+    --shadow: rgba(0, 0, 0, 0.4);
+  }
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  padding: 14px;
+  min-height: 100vh;
+}
+
+.hub-header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.hub-header h1 { font-size: 18px; font-weight: 700; }
+.note-count { color: var(--muted); font-size: 12px; }
+
+.panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px var(--shadow);
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.panel-head h2 { font-size: 14px; font-weight: 600; }
+
+.hint { color: var(--muted); font-size: 12px; line-height: 1.4; margin-bottom: 10px; }
+.empty { color: var(--muted); font-size: 12px; margin-top: 8px; }
+
+.hub-btn {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.hub-btn:hover { border-color: var(--accent); }
+.hub-btn:disabled { opacity: 0.5; cursor: default; }
+.hub-btn.small { font-size: 12px; padding: 5px 10px; }
+.hub-btn.primary {
+  width: 100%;
+  background: color-mix(in srgb, var(--accent) 18%, var(--card));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+  font-weight: 600;
+}
+
+.surprise-out {
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+/* ---- Clusters ------------------------------------------------------------ */
+.cluster {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 10px;
+  background: var(--bg);
+}
+.cluster.filed { opacity: 0.7; }
+.cluster-head { margin-bottom: 6px; }
+.cluster-count { font-size: 12px; font-weight: 600; color: var(--muted); }
+
+.cluster-notes { list-style: none; margin: 0 0 10px; }
+.cluster-notes li {
+  font-size: 12px;
+  padding: 3px 0 3px 12px;
+  position: relative;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cluster-notes li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+}
+
+.cluster-actions { display: flex; gap: 6px; align-items: center; }
+.group-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 5px 8px;
+}
+.group-name:focus { outline: 1px solid var(--accent); }
+.filed-label { color: var(--accent); font-size: 12px; font-weight: 600; }

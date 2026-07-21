@@ -5,20 +5,54 @@
 //! store to the desktop: one window per note, a tray icon, a global shortcut,
 //! auto-launch on login, and a single-instance guard.
 
+use std::fs;
+use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
 };
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine as _;
+
+use note_store::similarity::{self, Cluster, Match};
 use note_store::{Note, NoteStore};
 
 /// File name (inside the OS app-data directory) that notes are persisted to.
 const NOTES_FILE: &str = "notes.json";
+/// Sub-directory (inside the OS app-data directory) holding attachment files.
+const ATTACHMENTS_DIR: &str = "attachments";
+/// Window label for the single Library Hub window.
+const HUB_LABEL: &str = "hub";
+/// Similarity threshold above which two notes are treated as near-duplicates.
+const DUPLICATE_THRESHOLD: f64 = 0.35;
+/// Similarity threshold for grouping notes in Smart Organization.
+const CLUSTER_THRESHOLD: f64 = 0.18;
+
+/// Milliseconds since the unix epoch — used to name attachment files uniquely.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The `attachments/` directory inside app-data, created on demand.
+fn attachments_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join(ATTACHMENTS_DIR);
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
 
 /// Shared application state: the note store behind a mutex so command handlers
 /// (which may run on different threads) serialize their access to disk.
@@ -32,24 +66,52 @@ fn window_label(id: &str) -> String {
 }
 
 /// Open (or focus, if it already exists) the window for a single note.
+///
+/// The window is built on the event loop via `run_on_main_thread`. Creating a
+/// WebView2 window synchronously from a command handler blocks the message pump
+/// the webview needs to finish initializing, which leaves it rendered blank/white
+/// until the next app launch. Deferring the build to the main loop avoids that.
 fn open_note_window(app: &AppHandle, note: &Note) -> tauri::Result<()> {
-    let label = window_label(&note.id);
-    if let Some(existing) = app.get_webview_window(&label) {
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        return Ok(());
-    }
+    let app = app.clone();
+    let note = note.clone();
+    app.clone().run_on_main_thread(move || {
+        let label = window_label(&note.id);
+        if let Some(existing) = app.get_webview_window(&label) {
+            let _ = existing.show();
+            let _ = existing.set_focus();
+            return;
+        }
+        let _ = WebviewWindowBuilder::new(&app, &label, WebviewUrl::App("index.html".into()))
+            .title("Sticky Note")
+            .inner_size(note.width, note.height)
+            .position(note.x, note.y)
+            .min_inner_size(180.0, 160.0)
+            .decorations(false)
+            .resizable(true)
+            .skip_taskbar(true)
+            .build();
+    })
+}
 
-    WebviewWindowBuilder::new(app, &label, WebviewUrl::App("index.html".into()))
-        .title("Sticky Note")
-        .inner_size(note.width, note.height)
-        .position(note.x, note.y)
-        .min_inner_size(180.0, 160.0)
-        .decorations(false)
-        .resizable(true)
-        .skip_taskbar(true)
-        .build()?;
-    Ok(())
+/// Open (or focus) the single Library Hub window — the aggregate surface for
+/// Surprise Me and Smart Organization, which need the whole note library.
+/// Built on the event loop for the same reason as [`open_note_window`].
+fn open_hub_window(app: &AppHandle) -> tauri::Result<()> {
+    let app = app.clone();
+    app.clone().run_on_main_thread(move || {
+        if let Some(existing) = app.get_webview_window(HUB_LABEL) {
+            let _ = existing.show();
+            let _ = existing.set_focus();
+            return;
+        }
+        let _ = WebviewWindowBuilder::new(&app, HUB_LABEL, WebviewUrl::App("hub.html".into()))
+            .title("Sticky Notes — Library")
+            .inner_size(460.0, 560.0)
+            .min_inner_size(360.0, 400.0)
+            .resizable(true)
+            .skip_taskbar(false)
+            .build();
+    })
 }
 
 /// Create a brand-new note and open its window. Shared by the tray, the global
@@ -103,8 +165,12 @@ fn list_notes(state: tauri::State<AppState>) -> Result<Vec<Note>, String> {
 }
 
 /// Create a new note and open its window.
+///
+/// Async so it runs off the main thread: building a WebView2 window while the
+/// main event loop is blocked (as a sync command does) leaves the new webview
+/// blank/white. An async command doesn't hold up the loop, so the webview loads.
 #[tauri::command]
-fn create_note(app: AppHandle) -> Result<Note, String> {
+async fn create_note(app: AppHandle) -> Result<Note, String> {
     spawn_new_note(&app)
 }
 
@@ -146,16 +212,374 @@ fn update_note_geometry(
         .map_err(|e| e.to_string())
 }
 
-/// Delete a note and close its window.
+/// Delete a note, remove its attachment files, and close its window.
 #[tauri::command]
 fn delete_note(app: AppHandle, id: String, state: tauri::State<AppState>) -> Result<(), String> {
-    {
+    let removed = {
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
-        store.delete(&id).map_err(|e| e.to_string())?;
+        store.delete(&id).map_err(|e| e.to_string())?
+    };
+    // Best-effort cleanup of the note's sidecar attachment files.
+    if !removed.attachments.is_empty() {
+        if let Ok(dir) = attachments_dir(&app) {
+            for file in &removed.attachments {
+                let _ = fs::remove_file(dir.join(file));
+            }
+        }
     }
     if let Some(win) = app.get_webview_window(&window_label(&id)) {
         let _ = win.close();
     }
+    Ok(())
+}
+
+/// Persist a note's window opacity (clamped to a legible range in the store).
+#[tauri::command]
+fn update_note_opacity(
+    id: String,
+    opacity: f64,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    store.set_opacity(&id, opacity).map_err(|e| e.to_string())
+}
+
+/// Apply a whole-window translucency to the calling note window so lowering the
+/// opacity slider genuinely shows the desktop through the note. Uses a Windows
+/// layered window (`SetLayeredWindowAttributes`), which — unlike WebView2's
+/// per-pixel `transparent` mode — reliably composites the whole window over the
+/// desktop. `opacity` is `0.2..=1.0` (1.0 = fully opaque).
+#[tauri::command]
+fn set_window_opacity(window: tauri::WebviewWindow, opacity: f64) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        // The HWND as a plain integer so the closure is `Send`.
+        let raw = window.hwnd().map_err(|e| e.to_string())?.0 as isize;
+        let alpha = (opacity.clamp(0.2, 1.0) * 255.0).round() as u8;
+        // Win32 window calls MUST run on the UI thread. Doing them from this
+        // command's worker thread sends synchronous messages to the UI thread,
+        // which deadlocks if it's mid-window-creation (e.g. a focus change fired
+        // while "New note"/"Library" builds a window). Marshal onto the main loop.
+        window
+            .run_on_main_thread(move || {
+                use windows_sys::Win32::Foundation::HWND;
+                use windows_sys::Win32::UI::WindowsAndMessaging::{
+                    GetWindowLongPtrW, SetLayeredWindowAttributes, SetWindowLongPtrW, GWL_EXSTYLE,
+                    LWA_ALPHA, WS_EX_LAYERED,
+                };
+                let hwnd = raw as HWND;
+                unsafe {
+                    let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+                    if alpha >= 255 {
+                        // Fully opaque: keep it a normal (non-layered) window.
+                        // Applying WS_EX_LAYERED to a freshly-created WebView2
+                        // window makes it render blank/white, and a full-opacity
+                        // note doesn't need layering — so only layer when actually
+                        // translucent (by which point the note is already painted).
+                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex & !(WS_EX_LAYERED as isize));
+                    } else {
+                        SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED as isize);
+                        SetLayeredWindowAttributes(hwnd, 0, alpha, LWA_ALPHA);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (window, opacity);
+    }
+    Ok(())
+}
+
+/// Assign a note to a group, or clear it with `null`.
+#[tauri::command]
+fn update_note_group(
+    id: String,
+    group_id: Option<String>,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    store.set_group(&id, group_id).map_err(|e| e.to_string())
+}
+
+/// Assign many notes to a group at once (Smart Organization's "accept").
+#[tauri::command]
+fn assign_group(
+    note_ids: Vec<String>,
+    group_id: Option<String>,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    for id in &note_ids {
+        store
+            .set_group(id, group_id.clone())
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Focus (opening if needed) a single note's window — the "Show Existing" action.
+/// Async for the same reason as [`create_note`] (it may build a window).
+#[tauri::command]
+async fn focus_note(
+    app: AppHandle,
+    id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let note = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        store.get(&id).cloned()
+    };
+    if let Some(note) = note {
+        open_note_window(&app, &note).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Open the Library Hub window. Async for the same reason as [`create_note`].
+#[tauri::command]
+async fn open_hub(app: AppHandle) -> Result<(), String> {
+    open_hub_window(&app).map_err(|e| e.to_string())
+}
+
+/// Compose a local, offline "Surprise Me" message from the library. `hour` is the
+/// user's local hour-of-day (supplied by the frontend) for the greeting.
+#[tauri::command]
+fn surprise_me(hour: u32, state: tauri::State<AppState>) -> Result<String, String> {
+    let notes = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        store.all()
+    };
+    Ok(similarity::surprise_message(&notes, hour, now_ms()))
+}
+
+/// Find the note most similar to `id` above the duplicate threshold, if any.
+/// Called at a note's commit moment (blur) for Smart Duplicate Detection.
+#[tauri::command]
+fn find_duplicate(id: String, state: tauri::State<AppState>) -> Result<Option<Match>, String> {
+    let notes = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        store.all()
+    };
+    Ok(similarity::most_similar(&id, &notes, DUPLICATE_THRESHOLD))
+}
+
+/// Propose groups of similar notes for Smart Organization.
+#[tauri::command]
+fn suggest_groups(state: tauri::State<AppState>) -> Result<Vec<Cluster>, String> {
+    let notes = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        store.all()
+    };
+    Ok(similarity::cluster(&notes, CLUSTER_THRESHOLD))
+}
+
+/// Merge `source` into `target`, then close the source window ("Merge" action).
+#[tauri::command]
+fn merge_notes(
+    app: AppHandle,
+    source_id: String,
+    target_id: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store
+            .merge(&source_id, &target_id)
+            .map_err(|e| e.to_string())?;
+    }
+    // Attachments moved to the target, so do NOT delete files here — just close.
+    if let Some(win) = app.get_webview_window(&window_label(&source_id)) {
+        let _ = win.close();
+    }
+    Ok(())
+}
+
+/// Copy an image chosen by the user into the note's attachments and record it.
+/// If the note is protected, the file is sealed at rest so its bytes never sit
+/// on disk in the clear. Returns the stored file name.
+#[tauri::command]
+fn attach_image(
+    app: AppHandle,
+    id: String,
+    source_path: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let src = PathBuf::from(&source_path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let raw = fs::read(&src).map_err(|e| e.to_string())?;
+    let file_name = format!("{id}-{}.{ext}", now_ms());
+    let dest = attachments_dir(&app)?.join(&file_name);
+
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    let protected = store.get(&id).map(|n| n.protected).unwrap_or(false);
+    let data = if protected {
+        store.encrypt_bytes(&raw).map_err(|e| e.to_string())?
+    } else {
+        raw
+    };
+    fs::write(&dest, &data).map_err(|e| e.to_string())?;
+    store
+        .add_attachment(&id, file_name.clone())
+        .map_err(|e| e.to_string())?;
+    Ok(file_name)
+}
+
+/// Guess an image MIME type from a file name's extension.
+fn mime_for(file: &str) -> &'static str {
+    let ext = std::path::Path::new(file)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Remove an attachment from a note and delete its file (best-effort).
+#[tauri::command]
+fn remove_attachment(
+    app: AppHandle,
+    id: String,
+    file: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store
+            .remove_attachment(&id, &file)
+            .map_err(|e| e.to_string())?;
+    }
+    let _ = fs::remove_file(attachments_dir(&app)?.join(&file));
+    Ok(())
+}
+
+/// Read an attachment as a `data:` URL, decrypting it first if the note is
+/// protected. Serving bytes this way (rather than a file path) means an
+/// encrypted attachment is never written to disk in the clear to be displayed.
+#[tauri::command]
+fn read_attachment(
+    app: AppHandle,
+    id: String,
+    file: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let path = attachments_dir(&app)?.join(&file);
+    let raw = fs::read(&path).map_err(|e| e.to_string())?;
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let protected = store.get(&id).map(|n| n.protected).unwrap_or(false);
+    let bytes = if protected {
+        store.decrypt_bytes(&raw).map_err(|e| e.to_string())?
+    } else {
+        raw
+    };
+    Ok(format!("data:{};base64,{}", mime_for(&file), BASE64.encode(bytes)))
+}
+
+// ---------------------------------------------------------------------------
+// Password protection
+// ---------------------------------------------------------------------------
+
+/// Whether a master password has been configured.
+#[tauri::command]
+fn has_master(state: tauri::State<AppState>) -> Result<bool, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    Ok(store.has_master())
+}
+
+/// Whether the vault is currently locked (master set, but no key held this run).
+#[tauri::command]
+fn is_locked(state: tauri::State<AppState>) -> Result<bool, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    Ok(store.is_locked())
+}
+
+/// Set the master password for the first time (starts the session unlocked).
+#[tauri::command]
+fn set_master_password(
+    app: AppHandle,
+    password: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store
+            .set_master_password(&password)
+            .map_err(|e| e.to_string())?;
+    }
+    let _ = app.emit("vault-changed", ());
+    Ok(())
+}
+
+/// Try to unlock the vault. Returns `false` (no error) on a wrong password.
+#[tauri::command]
+fn unlock_vault(
+    app: AppHandle,
+    password: String,
+    state: tauri::State<AppState>,
+) -> Result<bool, String> {
+    let ok = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store.unlock(&password).map_err(|e| e.to_string())?
+    };
+    if ok {
+        // Tell every note window to refresh now that protected content is readable.
+        let _ = app.emit("vault-changed", ());
+    }
+    Ok(ok)
+}
+
+/// Toggle a note's protection. Errors if the vault is locked or unset (protecting).
+/// Also migrates the note's attachment files: they are sealed when protecting and
+/// unsealed when un-protecting, so an attachment's on-disk state always matches.
+#[tauri::command]
+fn set_note_protected(
+    app: AppHandle,
+    id: String,
+    protected: bool,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store
+            .set_protected(&id, protected)
+            .map_err(|e| e.to_string())?;
+
+        let files = store.get(&id).map(|n| n.attachments.clone()).unwrap_or_default();
+        if !files.is_empty() {
+            let dir = attachments_dir(&app)?;
+            for f in &files {
+                let path = dir.join(f);
+                let raw = match fs::read(&path) {
+                    Ok(b) => b,
+                    Err(_) => continue, // missing file: nothing to migrate
+                };
+                let out = if protected {
+                    // Sealing must succeed; a failure here would leave plaintext.
+                    store.encrypt_bytes(&raw).map_err(|e| e.to_string())?
+                } else {
+                    // Best-effort: skip a file that isn't actually sealed.
+                    match store.decrypt_bytes(&raw) {
+                        Ok(b) => b,
+                        Err(_) => continue,
+                    }
+                };
+                fs::write(&path, &out).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    let _ = app.emit("vault-changed", ());
     Ok(())
 }
 
@@ -183,9 +607,13 @@ fn set_autostart(app: AppHandle, enabled: bool) -> Result<(), String> {
 fn build_tray(app: &AppHandle, icon: tauri::image::Image<'_>) -> tauri::Result<()> {
     let new_item = MenuItem::with_id(app, "new", "New Note", true, Some("Ctrl+Alt+N"))?;
     let show_item = MenuItem::with_id(app, "show_all", "Show All Notes", true, None::<&str>)?;
+    let library_item = MenuItem::with_id(app, "library", "Library…", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&new_item, &show_item, &separator, &quit_item])?;
+    let menu = Menu::with_items(
+        app,
+        &[&new_item, &show_item, &library_item, &separator, &quit_item],
+    )?;
 
     TrayIconBuilder::with_id("main-tray")
         .icon(icon)
@@ -198,6 +626,9 @@ fn build_tray(app: &AppHandle, icon: tauri::image::Image<'_>) -> tauri::Result<(
                 let _ = spawn_new_note(app);
             }
             "show_all" => show_all_notes(app),
+            "library" => {
+                let _ = open_hub_window(app);
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -246,6 +677,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None::<Vec<&str>>,
         ))
+        // Native file picker, used to attach images to a note.
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 1. Load persisted notes from the OS app-data directory.
             let data_dir = app.path().app_data_dir()?;
@@ -299,7 +732,25 @@ pub fn run() {
             update_note_content,
             update_note_color,
             update_note_geometry,
+            update_note_opacity,
+            set_window_opacity,
+            update_note_group,
+            assign_group,
             delete_note,
+            focus_note,
+            open_hub,
+            surprise_me,
+            find_duplicate,
+            suggest_groups,
+            merge_notes,
+            attach_image,
+            remove_attachment,
+            read_attachment,
+            has_master,
+            is_locked,
+            set_master_password,
+            unlock_vault,
+            set_note_protected,
             is_autostart_enabled,
             set_autostart,
         ])
