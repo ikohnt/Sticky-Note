@@ -1,13 +1,13 @@
 # Sticky Notes
 
-> Lightweight desktop sticky notes for Windows — draggable, resizable, and always exactly where you left them. Now with per‑note transparency, image attachments, password‑protected notes and offline smart‑organisation. Built with [Tauri 2](https://v2.tauri.app/) and Rust.
+> Lightweight desktop sticky notes for Windows — draggable, resizable, and always exactly where you left them. Now with per‑note transparency, image attachments, password‑protected notes, clip‑together stacks and offline smart‑organisation. Built with [Tauri 2](https://v2.tauri.app/) and Rust.
 
 ![Platform](https://img.shields.io/badge/platform-Windows-0078D6)
 ![Built with Tauri 2](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB)
 ![Rust](https://img.shields.io/badge/Rust-1.77%2B-000000?logo=rust)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-A tiny sticky‑notes app that lives in your system tray. Spin up a note with a global hotkey or a click, scribble on it, drag it anywhere on your desktop, and it saves itself automatically — restoring every note's text, position, size and colour each time you log in. Attach images, dial in how see‑through a note is, lock the private ones behind a master password, and let the built‑in Library tidy related notes into collections. **No accounts, no cloud, no Electron** — the smart features run entirely on your machine.
+A tiny sticky‑notes app that lives in your system tray. Spin up a note with a global hotkey or a click, scribble on it, drag it anywhere on your desktop, and it saves itself automatically — restoring every note's text, position, size and colour each time you log in. Attach images, dial in how see‑through a note is, lock the private ones behind a master password, clip related notes into a single stack to declutter, and let the built‑in Library surface duplicates and suggest groups. **No accounts, no cloud, no Electron** — the smart features run entirely on your machine.
 
 <!-- Add a screenshot or GIF here to make the repo shine, e.g. put one at docs/screenshot.png:
 ![Sticky Notes screenshot](docs/screenshot.png)
@@ -26,10 +26,11 @@ A tiny sticky‑notes app that lives in your system tray. Spin up a note with a 
 
 **Organising**
 
-- **Collections** — file related notes into named groups.
+- **Clips** — collapse several related notes into a single **stack** window: drag one note onto another (or multi‑select in the Library) to clip them, flip through the pile, rename it, and un‑clip to fan them back out into separate windows.
 - **Library** window (tray → *Library*, or the ☰ button on a note):
   - **Surprise Me** — a friendly greeting / nudge composed from your own notes.
-  - **Smart Organization** — clusters similar notes so you can file a whole group at once.
+  - **Smart Organization** — clusters similar notes so you can clip a whole cluster into a stack at once.
+  - **Clip selected** — tick a few notes and stack them into a clip in one click.
 - **Smart Duplicate Detection** — when a note looks a lot like an existing one, it offers **Merge**, **Keep both**, or **Show existing** (with a plain reason why they matched). All of this is computed **on‑device** — no note ever leaves your machine.
 
 **Private & safe**
@@ -78,7 +79,10 @@ npm test           # run the note-store unit + integration tests
 | Protect a note | The 🔒 button (you'll set a master password the first time) |
 | Unlock protected notes | Enter the master password on any locked note — it unlocks them all for the session |
 | Open the Library | The ☰ button on a note, or right‑click the tray icon → *Library…* |
-| Group similar notes | *Library* → *Suggest groups* → name a cluster and file it |
+| Auto-group similar notes | *Library* → *Suggest groups* → name a cluster and *Clip these* |
+| Clip notes into a stack | Drag one note onto another, or *Library* → tick notes → *Clip selected* |
+| Flip through a clip | The `‹` / `›` buttons on the stack window |
+| Un‑clip | On the stack: `↥` takes the current note out, `⤢` fans the whole clip back out |
 | Delete | The `×` button on the note |
 | Show all notes | Right‑click the tray icon → *Show All Notes* |
 | Quit | Right‑click the tray icon → *Quit* |
@@ -89,6 +93,7 @@ Everything lives locally under `%APPDATA%\com.stickynotes.desktop\` and **never 
 
 - `notes.json` — your notes (JSON). Writes are atomic (temp file + rename), so a crash can't truncate them; if the file is ever unreadable it's moved aside to `notes.json.corrupt-<timestamp>` and the app starts fresh instead of failing to launch.
 - `attachments/` — image attachments, stored as separate files (keeps `notes.json` small and fast to save).
+- `clips.json` — your clip (stack) definitions: each clip's name and window geometry. Which notes belong to a clip is tracked on the notes themselves, so `notes.json` stays a plain list.
 - `master.json` — only present once you set a master password. It stores a **verifier**, never the password or the key.
 
 **Protected notes** are sealed at rest: the note's text and its attachment files are encrypted with **AES‑256‑GCM**, using a 32‑byte key derived from your master password with **Argon2id**. The vault starts locked each run; unlocking once reveals every protected note for that session. Because the password is never stored, **there is no way to recover a protected note if you forget it.**
@@ -100,18 +105,19 @@ The **Library** features (Surprise Me, Smart Organization) and **duplicate detec
 Two Rust crates keep the important logic testable:
 
 - **`note-store`** (`src-tauri/note-store`) — the pure data layer, with no Tauri dependency so its tests run in seconds:
-  - `lib.rs` — the `Note` model, JSON load/save, atomic writes, corruption recovery, CRUD, plus opacity/group/attachment/protection updates and note merging.
+  - `lib.rs` — the `Note` and `Clip` models, JSON load/save, atomic writes, corruption recovery, CRUD, plus opacity/group/attachment/protection updates, note merging, and clip (stack) membership.
   - `similarity.rs` — offline TF‑IDF cosine similarity + clustering that powers Smart Organization, Smart Duplicate Detection and Surprise Me. Dependency‑free; nothing is downloaded or sent anywhere.
   - `crypto.rs` — Argon2id key derivation and AES‑256‑GCM sealing for protected notes and their attachments.
-- **`sticky-notes`** (`src-tauri`) — the Tauri shell: one window per note plus the Library window, the tray icon, the global shortcut, launch‑at‑login, a single‑instance guard, and thin (async) command handlers that call into `note-store`.
+- **`sticky-notes`** (`src-tauri`) — the Tauri shell: a window per note, a stack window per clip and the Library window, the tray icon, the global shortcut, launch‑at‑login, a single‑instance guard, and thin (async) command handlers that call into `note-store`. Windows are built on the event loop so their webviews always initialise.
 
-The frontend (`src/`) is vanilla HTML/CSS/JS using the global `window.__TAURI__` API — no bundler or build step.
+The frontend (`src/`) is vanilla HTML/CSS/JS using the global `window.__TAURI__` API — no bundler or build step. Each window type is its own page; two lightweight events (`vault-changed`, `clips-changed`) keep the separate webviews in sync.
 
 ```
 .
 ├─ src/                       # frontend (vanilla HTML/CSS/JS, no bundler)
 │  ├─ index.html / main.js / styles.css   # a single note window
-│  └─ hub.html  / hub.js  / hub.css        # the Library window
+│  ├─ hub.html  / hub.js  / hub.css        # the Library window
+│  └─ stack.html / stack.js                # a clip's stack window
 └─ src-tauri/
    ├─ src/                    # Tauri shell (main.rs, lib.rs)
    ├─ note-store/             # pure-logic crate + tests
@@ -131,7 +137,7 @@ The app registers itself under `HKCU\Software\Microsoft\Windows\CurrentVersion\R
 npm test
 ```
 
-Covers the full `note-store` surface: note creation, editing, geometry updates, deletion and persistence round‑trips (including a multi‑note restart scenario); corrupted‑file recovery, empty/missing files, default‑field fallback and unique id generation; opacity clamping, grouping, attachment add/remove and note merging; the offline similarity engine (tokenising, matching, clustering, protected/empty‑note exclusion); and the encryption path — a protect → lock → unlock round‑trip that asserts a protected note's plaintext **never reaches disk**.
+Covers the full `note-store` surface: note creation, editing, geometry updates, deletion and persistence round‑trips (including a multi‑note restart scenario); corrupted‑file recovery, empty/missing files, default‑field fallback and unique id generation; opacity clamping, grouping, attachment add/remove and note merging; clips — membership, `clips.json` round‑trips and auto‑dissolving a clip that drops below two notes; the offline similarity engine (tokenising, matching, clustering, protected/empty‑note exclusion); and the encryption path — a protect → lock → unlock round‑trip that asserts a protected note's plaintext **never reaches disk**.
 
 ## Troubleshooting
 

@@ -44,17 +44,20 @@
 
     <div id="resize-handle" title="Drag to resize" aria-hidden="true"></div>
 
-    <!-- Locked overlay: shown when a protected note is locked -->
-    <div id="lock-overlay" class="modal" hidden>
-      <div class="modal-card">
-        <p class="modal-title">🔒 Locked note</p>
-        <p class="modal-reason">Enter the master password to view this note.</p>
+    <!-- Frosted lock screen: covers a protected note while the vault is locked.
+         The note's real content is encrypted and not present here; the blurred
+         bars are a placeholder that reads as "hidden content". -->
+    <div id="lock-overlay" class="lock-screen" hidden data-tauri-drag-region>
+      <div class="lock-redact" aria-hidden="true">
+        <span></span><span></span><span></span><span></span><span></span>
+      </div>
+      <div class="lock-prompt">
+        <div class="lock-emoji" aria-hidden="true">🔒</div>
+        <p class="lock-title">This note is protected</p>
         <input id="unlock-input" class="pw-input" type="password" placeholder="Master password"
                autocomplete="current-password" />
         <p id="unlock-error" class="pw-error" hidden>Wrong password — try again.</p>
-        <div class="modal-actions">
-          <button id="unlock-btn" class="btn primary">Unlock</button>
-        </div>
+        <button id="unlock-btn" class="btn primary">Unlock</button>
       </div>
     </div>
 

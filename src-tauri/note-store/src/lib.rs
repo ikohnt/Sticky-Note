@@ -103,6 +103,44 @@ pub struct Note {
     pub enc: Option<crypto::Sealed>,
 }
 
+/// Default width/height for a clip's stack window.
+pub const DEFAULT_CLIP_WIDTH: f64 = 300.0;
+pub const DEFAULT_CLIP_HEIGHT: f64 = 340.0;
+fn default_clip_width() -> f64 {
+    DEFAULT_CLIP_WIDTH
+}
+fn default_clip_height() -> f64 {
+    DEFAULT_CLIP_HEIGHT
+}
+
+/// A "clip": a stack that collapses several notes into a single window. Which
+/// notes belong to it is tracked on the notes themselves (a note is in clip `C`
+/// iff `note.group_id == Some(C.id)`); this struct only holds the stack window's
+/// own name, geometry and colour. Persisted to a sibling `clips.json`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Clip {
+    /// Stable unique id. Also used as the window label (`clip-<id>`).
+    pub id: String,
+    /// User-facing name of the clip.
+    #[serde(default)]
+    pub name: String,
+    /// Stack window x position (logical pixels).
+    #[serde(default)]
+    pub x: f64,
+    /// Stack window y position (logical pixels).
+    #[serde(default)]
+    pub y: f64,
+    /// Stack window width (logical pixels).
+    #[serde(default = "default_clip_width")]
+    pub width: f64,
+    /// Stack window height (logical pixels).
+    #[serde(default = "default_clip_height")]
+    pub height: f64,
+    /// Colour theme key for the stack chrome.
+    #[serde(default = "default_color")]
+    pub color: String,
+}
+
 /// Errors that can occur while loading or mutating the store.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -135,7 +173,11 @@ pub struct NoteStore {
     path: PathBuf,
     /// Sibling file holding the master-password credential, if one is set.
     master_path: PathBuf,
+    /// Sibling file holding the clip (stack) definitions.
+    clips_path: PathBuf,
     notes: HashMap<String, Note>,
+    /// Clip (stack) definitions, keyed by clip id.
+    clips: HashMap<String, Clip>,
     /// The master credential loaded from disk, if a master password was set.
     master: Option<crypto::MasterCred>,
     /// The derived session key once unlocked this run; `None` means locked.
@@ -179,10 +221,22 @@ impl NoteStore {
             Err(_) => None,
         };
 
+        // Clip definitions live in a sibling `clips.json`. A missing/unreadable
+        // file just means "no clips" — never blocks startup.
+        let clips_path = clips_path_for(&path);
+        let clips = match fs::read_to_string(&clips_path) {
+            Ok(text) => serde_json::from_str::<Vec<Clip>>(&text)
+                .map(|list| list.into_iter().map(|c| (c.id.clone(), c)).collect())
+                .unwrap_or_default(),
+            Err(_) => HashMap::new(),
+        };
+
         Ok(Self {
             path,
             master_path,
+            clips_path,
             notes,
+            clips,
             master,
             // Always start locked; the user must enter the password this run.
             key: None,
@@ -322,6 +376,146 @@ impl NoteStore {
         self.save()
     }
 
+    // ---- Clips (stacks) --------------------------------------------------
+
+    /// Borrow a clip by id.
+    pub fn get_clip(&self, id: &str) -> Option<&Clip> {
+        self.clips.get(id)
+    }
+
+    /// All clips, ordered by id (stable for restore order).
+    pub fn all_clips(&self) -> Vec<Clip> {
+        let mut list: Vec<Clip> = self.clips.values().cloned().collect();
+        list.sort_by(|a, b| a.id.cmp(&b.id));
+        list
+    }
+
+    /// Notes belonging to `clip_id`, ordered by creation (the stack order).
+    pub fn clip_notes(&self, clip_id: &str) -> Vec<Note> {
+        let mut list: Vec<Note> = self
+            .notes
+            .values()
+            .filter(|n| n.group_id.as_deref() == Some(clip_id))
+            .cloned()
+            .collect();
+        list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        list
+    }
+
+    /// Create a new (empty) clip with the given name and stack-window geometry.
+    pub fn create_clip(
+        &mut self,
+        name: String,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Result<Clip, StoreError> {
+        let clip = Clip {
+            id: new_id(),
+            name: if name.trim().is_empty() {
+                "Clip".to_string()
+            } else {
+                name
+            },
+            x,
+            y,
+            width: width.max(200.0),
+            height: height.max(180.0),
+            color: DEFAULT_COLOR.to_string(),
+        };
+        self.clips.insert(clip.id.clone(), clip.clone());
+        self.save_clips()?;
+        Ok(clip)
+    }
+
+    /// Update a clip's stack-window geometry.
+    pub fn set_clip_geometry(
+        &mut self,
+        id: &str,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+    ) -> Result<(), StoreError> {
+        {
+            let clip = self
+                .clips
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            clip.x = x;
+            clip.y = y;
+            clip.width = width.max(200.0);
+            clip.height = height.max(180.0);
+        }
+        self.save_clips()
+    }
+
+    /// Rename a clip.
+    pub fn rename_clip(&mut self, id: &str, name: String) -> Result<(), StoreError> {
+        {
+            let clip = self
+                .clips
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            clip.name = name;
+        }
+        self.save_clips()
+    }
+
+    /// Delete a clip and un-group all of its members (they become standalone).
+    pub fn delete_clip(&mut self, id: &str) -> Result<(), StoreError> {
+        let mut changed = false;
+        for note in self.notes.values_mut() {
+            if note.group_id.as_deref() == Some(id) {
+                note.group_id = None;
+                note.updated_at = now_ms();
+                changed = true;
+            }
+        }
+        self.clips.remove(id);
+        if changed {
+            self.save()?;
+        }
+        self.save_clips()
+    }
+
+    /// Put a note into an existing clip.
+    pub fn clip_note(&mut self, note_id: &str, clip_id: &str) -> Result<(), StoreError> {
+        if !self.clips.contains_key(clip_id) {
+            return Err(StoreError::NotFound(clip_id.to_string()));
+        }
+        self.set_group(note_id, Some(clip_id.to_string()))
+    }
+
+    /// Remove a note from its clip. If the clip is left with fewer than two
+    /// members it is dissolved (the last member becomes standalone). Returns the
+    /// clip the note left and whether that clip was dissolved, or `None` if the
+    /// note wasn't clipped.
+    pub fn unclip_note(&mut self, note_id: &str) -> Result<Option<(String, bool)>, StoreError> {
+        let clip_id = match self.notes.get(note_id).and_then(|n| n.group_id.clone()) {
+            Some(c) => c,
+            None => return Ok(None),
+        };
+        self.set_group(note_id, None)?;
+
+        let dissolved = self.clip_notes(&clip_id).len() < 2;
+        if dissolved {
+            self.delete_clip(&clip_id)?;
+        }
+        Ok(Some((clip_id, dissolved)))
+    }
+
+    /// Serialize clips and write them to their sibling file atomically.
+    fn save_clips(&self) -> Result<(), StoreError> {
+        let list = self.all_clips();
+        let json = serde_json::to_string_pretty(&list)?;
+        let tmp = tmp_path(&self.clips_path);
+        fs::write(&tmp, json.as_bytes())?;
+        fs::rename(&tmp, &self.clips_path)?;
+        Ok(())
+    }
+
     /// Mark a note as protected (behind the master password) or not.
     ///
     /// Protecting requires a master password to exist and the store to be
@@ -396,6 +590,23 @@ impl NoteStore {
         }
         self.key = Some(key);
         Ok(true)
+    }
+
+    /// Lock the vault now: re-seal every unlocked protected note in memory and
+    /// drop the session key, so protected content becomes unreadable (and its
+    /// windows show the locked state) until the next successful [`unlock`]. Safe
+    /// to call when already locked or when no master password is set.
+    pub fn lock(&mut self) -> Result<(), StoreError> {
+        if let Some(key) = self.key.take() {
+            for note in self.notes.values_mut() {
+                if note.protected && note.enc.is_none() {
+                    let sealed = crypto::seal(&key, note.content.as_bytes())?;
+                    note.content = String::new();
+                    note.enc = Some(sealed);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Encrypt arbitrary bytes (an attachment file) with the session key.
@@ -557,6 +768,14 @@ fn master_path_for(notes_path: &Path) -> PathBuf {
     }
 }
 
+/// `<dir>/clips.json` — the clip (stack) definitions beside the notes file.
+fn clips_path_for(notes_path: &Path) -> PathBuf {
+    match notes_path.parent() {
+        Some(dir) => dir.join("clips.json"),
+        None => PathBuf::from("clips.json"),
+    }
+}
+
 /// Milliseconds since the unix epoch (saturating to 0 before 1970).
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -691,6 +910,73 @@ mod tests {
         store.set_opacity(&id, 0.6).unwrap();
         let reloaded = store_in(dir.path());
         assert_eq!(reloaded.get(&id).unwrap().opacity, 0.6);
+    }
+
+    #[test]
+    fn clip_membership_and_geometry_round_trip() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let a = store.create(0.0, 0.0).unwrap().id;
+        let b = store.create(0.0, 0.0).unwrap().id;
+        let clip = store
+            .create_clip("Work".into(), 10.0, 20.0, 300.0, 340.0)
+            .unwrap();
+        store.clip_note(&a, &clip.id).unwrap();
+        store.clip_note(&b, &clip.id).unwrap();
+
+        assert_eq!(store.clip_notes(&clip.id).len(), 2);
+        assert_eq!(store.get(&a).unwrap().group_id.as_deref(), Some(clip.id.as_str()));
+
+        store.set_clip_geometry(&clip.id, 50.0, 60.0, 280.0, 300.0).unwrap();
+
+        // clips.json + notes.json both round-trip through a reload.
+        let reloaded = store_in(dir.path());
+        let rc = reloaded.get_clip(&clip.id).unwrap();
+        assert_eq!(rc.name, "Work");
+        assert_eq!(rc.x, 50.0);
+        assert_eq!(rc.width, 280.0);
+        assert_eq!(reloaded.clip_notes(&clip.id).len(), 2);
+    }
+
+    #[test]
+    fn unclip_dissolves_clip_with_one_member_left() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let a = store.create(0.0, 0.0).unwrap().id;
+        let b = store.create(0.0, 0.0).unwrap().id;
+        let clip = store.create_clip("C".into(), 0.0, 0.0, 300.0, 340.0).unwrap();
+        store.clip_note(&a, &clip.id).unwrap();
+        store.clip_note(&b, &clip.id).unwrap();
+
+        let res = store.unclip_note(&a).unwrap();
+        assert_eq!(res, Some((clip.id.clone(), true)));
+        assert!(store.get_clip(&clip.id).is_none());
+        assert_eq!(store.get(&a).unwrap().group_id, None);
+        assert_eq!(store.get(&b).unwrap().group_id, None, "last member freed too");
+    }
+
+    #[test]
+    fn delete_clip_ungroups_its_members() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let a = store.create(0.0, 0.0).unwrap().id;
+        let clip = store.create_clip("C".into(), 0.0, 0.0, 300.0, 340.0).unwrap();
+        store.clip_note(&a, &clip.id).unwrap();
+
+        store.delete_clip(&clip.id).unwrap();
+        assert!(store.get_clip(&clip.id).is_none());
+        assert_eq!(store.get(&a).unwrap().group_id, None);
+    }
+
+    #[test]
+    fn clip_note_requires_existing_clip() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let a = store.create(0.0, 0.0).unwrap().id;
+        assert!(matches!(
+            store.clip_note(&a, "no-such-clip"),
+            Err(StoreError::NotFound(_))
+        ));
     }
 
     #[test]
@@ -855,6 +1141,31 @@ mod tests {
         let locked = store_in(dir.path());
         assert!(matches!(locked.encrypt_bytes(b"x"), Err(StoreError::Locked)));
         assert!(matches!(locked.decrypt_bytes(&blob), Err(StoreError::Locked)));
+    }
+
+    #[test]
+    fn lock_reseals_protected_notes_and_hides_content() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let id = store.create(0.0, 0.0).unwrap().id;
+        store.set_content(&id, "my secret".into()).unwrap();
+        store.set_master_password("pw").unwrap();
+        store.set_protected(&id, true).unwrap();
+
+        // Unlocked right after protecting: content is readable.
+        assert!(!store.is_locked());
+        assert_eq!(store.get(&id).unwrap().content, "my secret");
+
+        // Lock now: content is hidden and the note reports as locked.
+        store.lock().unwrap();
+        assert!(store.is_locked());
+        let n = store.get(&id).unwrap();
+        assert_eq!(n.content, "");
+        assert!(n.enc.is_some());
+
+        // The same password unlocks it again.
+        assert!(store.unlock("pw").unwrap());
+        assert_eq!(store.get(&id).unwrap().content, "my secret");
     }
 
     #[test]

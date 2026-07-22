@@ -135,3 +135,23 @@ body {
 }
 .group-name:focus { outline: 1px solid var(--accent); }
 .filed-label { color: var(--accent); font-size: 12px; font-weight: 600; }
+
+/* ---- Clip picker --------------------------------------------------------- */
+#note-picker { max-height: 220px; overflow-y: auto; margin-top: 4px; }
+.pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 4px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.pick-row:hover { background: var(--bg); }
+.pick-row input { accent-color: var(--accent); flex: 0 0 auto; }
+.pick-text {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

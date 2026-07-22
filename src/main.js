@@ -235,6 +235,8 @@ lockBtn.addEventListener("click", async () => {
         return;
       }
       await invoke("set_note_protected", { id: noteId, protected: true });
+      // Lock right away so the note blurs and requires the password to reopen.
+      await invoke("lock_vault");
     }
   } catch (err) {
     console.error("Protection toggle failed:", err);
@@ -276,6 +278,8 @@ document.getElementById("master-create").addEventListener("click", async () => {
   try {
     await invoke("set_master_password", { password: pw });
     await invoke("set_note_protected", { id: noteId, protected: true });
+    // Lock right away so the note blurs and requires the password to reopen.
+    await invoke("lock_vault");
     masterOverlay.hidden = true;
   } catch (err) {
     console.error("Failed to set master password:", err);
@@ -439,7 +443,19 @@ async function persistGeometry() {
 }
 const persistGeometryDebounced = debounce(persistGeometry, 450);
 
-win.onMoved(persistGeometryDebounced);
+// After a drag settles, persist the position and then ask the backend whether
+// this note was dropped onto another note (or a clip) — if so, they get clipped
+// into a stack and this window closes.
+const onMoveSettled = debounce(async () => {
+  await persistGeometry();
+  try {
+    await invoke("try_clip_on_drop", { id: noteId });
+  } catch (err) {
+    console.error("Clip-on-drop failed:", err);
+  }
+}, 500);
+
+win.onMoved(onMoveSettled);
 win.onResized(persistGeometryDebounced);
 
 // ---- Resize grip (frameless window) --------------------------------------
