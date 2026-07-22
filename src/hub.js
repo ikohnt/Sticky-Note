@@ -10,19 +10,75 @@ const organizeBtn = document.getElementById("organize-btn");
 const clustersEl = document.getElementById("clusters");
 const organizeEmpty = document.getElementById("organize-empty");
 const noteCountEl = document.getElementById("note-count");
+const notePicker = document.getElementById("note-picker");
+const clipSelectedBtn = document.getElementById("clip-selected");
 
 // Cache id -> content so cluster previews can show a snippet.
 let notesById = new Map();
+// Ids ticked in the "Clip notes into a stack" picker.
+const selected = new Set();
 
 async function refreshNotes() {
   try {
     const notes = await invoke("list_notes");
     notesById = new Map(notes.map((n) => [n.id, n]));
     noteCountEl.textContent = notes.length === 1 ? "1 note" : `${notes.length} notes`;
+    renderPicker(notes);
   } catch (err) {
     console.error("Failed to list notes:", err);
   }
 }
+
+// ---- Clip picker (multi-select) -------------------------------------------
+function updateClipButton() {
+  clipSelectedBtn.disabled = selected.size < 2;
+}
+
+function renderPicker(notes) {
+  notePicker.innerHTML = "";
+  // Only un-clipped notes can start a new clip.
+  const available = notes.filter((n) => !n.group_id);
+  for (const id of [...selected]) {
+    if (!available.some((n) => n.id === id)) selected.delete(id);
+  }
+  if (available.length === 0) {
+    notePicker.innerHTML = '<p class="empty">No un-clipped notes to clip right now.</p>';
+    updateClipButton();
+    return;
+  }
+  for (const n of available) {
+    const row = document.createElement("label");
+    row.className = "pick-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = selected.has(n.id);
+    cb.addEventListener("change", () => {
+      if (cb.checked) selected.add(n.id);
+      else selected.delete(n.id);
+      updateClipButton();
+    });
+    const text = document.createElement("span");
+    text.className = "pick-text";
+    text.textContent = snippet(n.content);
+    row.appendChild(cb);
+    row.appendChild(text);
+    notePicker.appendChild(row);
+  }
+  updateClipButton();
+}
+
+clipSelectedBtn.addEventListener("click", async () => {
+  if (selected.size < 2) return;
+  clipSelectedBtn.disabled = true;
+  try {
+    await invoke("create_clip_from", { noteIds: [...selected], name: "Clip" });
+    selected.clear();
+    await refreshNotes();
+  } catch (err) {
+    console.error("Failed to clip notes:", err);
+    updateClipButton();
+  }
+});
 
 function snippet(content, max = 60) {
   const line = (content || "")
@@ -90,23 +146,23 @@ function renderClusters(clusters) {
     input.setAttribute("aria-label", "Group name");
     const accept = document.createElement("button");
     accept.className = "hub-btn small";
-    accept.textContent = "File into group";
+    accept.textContent = "Clip these";
     accept.addEventListener("click", async () => {
       accept.disabled = true;
+      const name = input.value.trim() || cluster.label || "Clip";
       try {
-        await invoke("assign_group", {
-          noteIds: cluster.note_ids,
-          groupId: input.value.trim() || cluster.label || "Group",
-        });
+        // Clip the cluster into a stack (this closes the notes' own windows and
+        // opens one stack window for them).
+        await invoke("create_clip_from", { noteIds: cluster.note_ids, name });
         card.classList.add("filed");
         row.innerHTML = "";
         const done = document.createElement("span");
         done.className = "filed-label";
-        done.textContent = "✓ Filed into “" + (input.value.trim() || cluster.label) + "”";
+        done.textContent = "✓ Clipped into “" + name + "”";
         row.appendChild(done);
         await refreshNotes();
       } catch (err) {
-        console.error("Failed to file group:", err);
+        console.error("Failed to clip cluster:", err);
         accept.disabled = false;
       }
     });

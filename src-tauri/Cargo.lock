@@ -2171,7 +2171,7 @@ checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
 name = "note-store"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -3326,7 +3326,7 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
 name = "sticky-notes"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "note-store",

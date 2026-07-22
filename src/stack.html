@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sticky Notes — Clip</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body class="color-yellow stack">
+    <!-- One window renders the whole clip: only the top note is in the DOM. -->
+    <div class="stack-card">
+      <header class="toolbar" data-tauri-drag-region>
+        <div class="swatches">
+          <button class="swatch s-yellow" data-color="yellow" title="Yellow"></button>
+          <button class="swatch s-pink" data-color="pink" title="Pink"></button>
+          <button class="swatch s-blue" data-color="blue" title="Blue"></button>
+          <button class="swatch s-green" data-color="green" title="Green"></button>
+          <button class="swatch s-purple" data-color="purple" title="Purple"></button>
+        </div>
+        <div class="actions">
+          <button id="unclip-one" class="icon-btn" title="Take this note out of the clip" aria-label="Un-clip this note">↥</button>
+          <button id="unclip-all" class="icon-btn" title="Un-clip all — fan back into windows" aria-label="Un-clip all">⤢</button>
+          <button id="delete-note" class="icon-btn danger" title="Delete this note" aria-label="Delete note">×</button>
+        </div>
+      </header>
+
+      <div class="stack-nav">
+        <button id="prev" class="icon-btn" title="Previous note" aria-label="Previous">‹</button>
+        <input id="clip-name" class="clip-name" aria-label="Clip name" placeholder="Clip" />
+        <span id="clip-pos" class="clip-pos"></span>
+        <button id="next" class="icon-btn" title="Next note" aria-label="Next">›</button>
+      </div>
+
+      <textarea id="content" spellcheck="true" placeholder="Write something…"></textarea>
+    </div>
+
+    <div id="resize-handle" title="Drag to resize" aria-hidden="true"></div>
+
+    <script src="stack.js"></script>
+  </body>
+</html>

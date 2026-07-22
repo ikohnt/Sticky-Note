@@ -278,3 +278,118 @@ body { transition: opacity 0.18s ease, filter 0.18s ease; }
 }
 .pw-input:focus { outline: 1px solid color-mix(in srgb, var(--ink) 55%, transparent); }
 .pw-error { color: #c0392b; font-size: 12px; margin-bottom: 8px; }
+
+/* ---- Frosted lock screen (protected + locked note) ----------------------- */
+.lock-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  /* Frost the note behind it: whatever shows through is blurred + tinted. */
+  background: color-mix(in srgb, var(--note) 78%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+.lock-screen[hidden] { display: none; }
+
+/* Blurred faux "text" bars — reads as content you can't make out. */
+.lock-redact {
+  position: absolute;
+  inset: 0;
+  padding: 52px 18px 18px; /* clear the title bar */
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  filter: blur(6px);
+  opacity: 0.45;
+  pointer-events: none;
+}
+.lock-redact span {
+  height: 12px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 55%, transparent);
+}
+.lock-redact span:nth-child(1) { width: 88%; }
+.lock-redact span:nth-child(2) { width: 66%; }
+.lock-redact span:nth-child(3) { width: 92%; }
+.lock-redact span:nth-child(4) { width: 54%; }
+.lock-redact span:nth-child(5) { width: 78%; }
+
+.lock-prompt {
+  position: relative;
+  z-index: 1;
+  max-width: 88%;
+  padding: 16px 16px 14px;
+  text-align: center;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--note) 88%, #fff 12%);
+  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
+  box-shadow: 0 8px 22px var(--shadow);
+  -webkit-app-region: no-drag;
+}
+.lock-emoji { font-size: 26px; line-height: 1; margin-bottom: 6px; }
+.lock-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+.lock-prompt .pw-input { margin-bottom: 8px; }
+.lock-prompt .btn { width: 100%; }
+
+/* ---- Clip stack window --------------------------------------------------- */
+/* The window background is the "pages underneath"; the top note sits on a card
+   inset a few px so those pages peek at the bottom-right edge. */
+body.stack {
+  display: block;
+  background: color-mix(in srgb, var(--ink) 22%, var(--note));
+  padding: 0 6px 6px 0;
+}
+.stack-card {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--note);
+  box-shadow: 1px 1px 5px var(--shadow);
+}
+/* A faint second page edge for depth. */
+.stack-card::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  right: -3px;
+  bottom: -3px;
+  left: 3px;
+  z-index: -1;
+  background: color-mix(in srgb, var(--ink) 12%, var(--note));
+}
+.stack-nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  -webkit-app-region: no-drag;
+  border-bottom: 1px solid color-mix(in srgb, var(--ink) 10%, transparent);
+}
+.clip-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 4px;
+  border-radius: 4px;
+  user-select: text;
+}
+.clip-name:focus {
+  outline: 1px solid color-mix(in srgb, var(--ink) 30%, transparent);
+  background: rgba(255, 255, 255, 0.4);
+}
+.clip-pos {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: color-mix(in srgb, var(--ink) 60%, transparent);
+}
