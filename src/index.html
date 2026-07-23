@@ -17,26 +17,52 @@
         <button class="swatch s-purple" data-color="purple" title="Purple"></button>
       </div>
       <div class="actions">
-        <button id="lock-note" class="icon-btn" title="Protect this note" aria-label="Protect note">🔓</button>
-        <button id="attach-note" class="icon-btn" title="Attach image" aria-label="Attach image">🖼</button>
-        <button id="open-library" class="icon-btn" title="Open library" aria-label="Open library">☰</button>
-        <button id="new-note" class="icon-btn" title="New note (Ctrl+Alt+N)" aria-label="New note">+</button>
-        <button id="delete-note" class="icon-btn danger" title="Delete this note" aria-label="Delete note">×</button>
+        <button id="pin-note" class="icon-btn" title="Keep on top" aria-label="Pin note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5"/><path d="M9 10.8V6a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9a2 2 0 0 1-1.1-1.8V6a1 1 0 0 1 1-1 2 2 0 0 0 0-4"/></svg></button>
+        <button id="lock-note" class="icon-btn" title="Protect this note" aria-label="Protect note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 9.9-1"/></svg></button>
+        <button id="more-note" class="icon-btn" title="More (or right-click the note)" aria-label="More actions"><svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+        <button id="new-note" class="icon-btn" title="New note (Ctrl+Alt+N)" aria-label="New note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+        <button id="delete-note" class="icon-btn danger" title="Delete this note" aria-label="Delete note"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
       </div>
     </header>
 
-    <!-- Group badge (shown only when the note belongs to a collection) -->
-    <div id="group-badge" class="group-badge" hidden></div>
+    <!-- Right-click (or the more button) context menu -->
+    <div id="ctx-menu" class="ctx-menu" hidden>
+      <button class="ctx-item" data-action="pin"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.8V6a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.7l-1.8-.9a2 2 0 0 1-1.1-1.8V6a1 1 0 0 1 1-1 2 2 0 0 0 0-4"/></svg></span><span class="ct">Keep on top</span></button>
+      <button class="ctx-item" data-action="attach"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg></span><span class="ct">Attach image</span></button>
+      <button class="ctx-item" data-action="protect"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span><span class="ct">Protect this note</span></button>
+      <button class="ctx-item" data-action="focus"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6.4 6.4 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg></span><span class="ct">Focus Mode</span></button>
+      <button class="ctx-item" data-action="theme"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/></svg></span><span class="ct">Dark theme</span></button>
+      <button class="ctx-item" data-action="style"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="13.5" cy="6.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="17.5" cy="10.5" r="1.5" fill="currentColor" stroke="none"/><circle cx="6.5" cy="12.5" r="1.5" fill="currentColor" stroke="none"/><path d="M12 2a10 10 0 1 0 0 20c1 0 1.5-.8 1.5-1.5 0-1.5-1.5-1.5 0-3 .8-.8 2-.5 3-.5A4.5 4.5 0 0 0 22 12 10 10 0 0 0 12 2Z"/></svg></span><span class="ct">Style &amp; background</span></button>
+      <button class="ctx-item" data-action="library"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg></span><span class="ct">Open Library</span></button>
+      <button class="ctx-item danger" data-action="delete"><span class="ci"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></span><span class="ct">Delete note</span></button>
+    </div>
+
+    <!-- First-run tip (shown once) -->
+    <div id="onboard-tip" class="onboard-tip" hidden>
+      <p><b>Ctrl+Alt+N</b> makes a note anywhere. Drag one note onto another to <b>clip</b> them into a stack. Right-click a note for more.</p>
+      <button id="onboard-dismiss" class="btn">Got it</button>
+    </div>
 
     <!-- Image attachments (sidecar files); hidden until the note has any -->
     <div id="attachments" class="attachments" hidden></div>
 
-    <textarea id="content" spellcheck="true" placeholder="Write something…"></textarea>
+    <!-- Markdown-lite formatting: inserts plain Markdown around the selection -->
+    <div id="format-bar" class="format-bar">
+      <button class="icon-btn fmt-btn" data-fmt="bold" title="Bold (Ctrl+B)" aria-label="Bold"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 5h6a3.5 3.5 0 0 1 0 7H7z"/><path d="M7 12h7a3.5 3.5 0 0 1 0 7H7z"/></svg></button>
+      <button class="icon-btn fmt-btn" data-fmt="italic" title="Italic (Ctrl+I)" aria-label="Italic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="19" y1="5" x2="11" y2="5"/><line x1="13" y1="19" x2="5" y2="19"/><line x1="15" y1="5" x2="9" y2="19"/></svg></button>
+      <button class="icon-btn fmt-btn" data-fmt="underline" title="Underline (Ctrl+U)" aria-label="Underline"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><line x1="4" y1="20" x2="20" y2="20"/></svg></button>
+      <button class="icon-btn fmt-btn" data-fmt="heading" title="Heading" aria-label="Heading"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 4v16"/><path d="M18 4v16"/><path d="M6 12h12"/></svg></button>
+      <button class="icon-btn fmt-btn" data-fmt="list" title="Bullet list" aria-label="Bullet list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/><circle cx="4.5" cy="6" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="4.5" cy="18" r="1.1" fill="currentColor" stroke="none"/></svg></button>
+      <button class="icon-btn fmt-btn" data-fmt="check" title="Checklist item" aria-label="Checklist item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="7" height="7" rx="1.5"/><path d="M14 8h7"/><path d="M14 16h7"/><path d="M3 17.5 4.6 19 8 15.5"/></svg></button>
+    </div>
+
+    <div id="content" class="content" contenteditable="true" spellcheck="true"
+         role="textbox" aria-multiline="true" data-placeholder="Write something..."></div>
 
     <footer class="statusbar" aria-hidden="false">
       <span id="timestamp" class="timestamp" title=""></span>
       <label class="opacity" title="Note opacity">
-        <span class="opacity-icon" aria-hidden="true">◐</span>
+        <span class="opacity-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" stroke="none"/></svg></span>
         <input id="opacity" type="range" min="30" max="100" step="5" value="100"
                aria-label="Note opacity" />
       </label>
@@ -44,20 +70,20 @@
 
     <div id="resize-handle" title="Drag to resize" aria-hidden="true"></div>
 
-    <!-- Frosted lock screen: covers a protected note while the vault is locked.
-         The note's real content is encrypted and not present here; the blurred
-         bars are a placeholder that reads as "hidden content". -->
+    <!-- Lock screen, styled like the Windows sign-in: the note's own surface is
+         blurred behind a centred login. The real text is encrypted and not here. -->
     <div id="lock-overlay" class="lock-screen" hidden data-tauri-drag-region>
-      <div class="lock-redact" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span>
-      </div>
-      <div class="lock-prompt">
-        <div class="lock-emoji" aria-hidden="true">🔒</div>
-        <p class="lock-title">This note is protected</p>
-        <input id="unlock-input" class="pw-input" type="password" placeholder="Master password"
-               autocomplete="current-password" />
-        <p id="unlock-error" class="pw-error" hidden>Wrong password — try again.</p>
-        <button id="unlock-btn" class="btn primary">Unlock</button>
+      <div class="lock-login">
+        <div class="lock-avatar" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></div>
+        <p class="lock-name">Protected note</p>
+        <p class="lock-sub">Enter your master password</p>
+        <div class="lock-input-row">
+          <input id="unlock-input" class="lock-pin" type="password" placeholder="Password"
+                 autocomplete="current-password" />
+          <button id="unlock-btn" class="lock-go" aria-label="Unlock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"/><path d="m12 5 7 7-7 7"/></svg></button>
+        </div>
+        <p id="unlock-error" class="lock-err" hidden>Wrong password - try again.</p>
+        <p class="lock-hint">One password unlocks all your protected notes.</p>
       </div>
     </div>
 
@@ -90,6 +116,79 @@
           <button id="dup-merge" class="btn primary">Merge</button>
           <button id="dup-keep" class="btn">Keep both</button>
           <button id="dup-show" class="btn">Show existing</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Style & background panel -->
+    <div id="style-panel" class="modal" hidden>
+      <div class="modal-card style-card">
+        <p class="modal-title">Style &amp; background</p>
+
+        <div class="style-section">
+          <span class="style-label">Presets</span>
+          <div id="preset-row" class="preset-row"></div>
+        </div>
+
+        <div class="style-section">
+          <span class="style-label">Background image</span>
+          <div class="style-btns">
+            <button id="theme-from-image" class="btn">Theme from image</button>
+            <button id="bg-image" class="btn">Use as background</button>
+            <button id="reset-style" class="btn">Reset</button>
+          </div>
+        </div>
+
+        <div class="style-section">
+          <span class="style-label">Text</span>
+          <div class="style-row">
+            <select id="font-select" class="style-select" aria-label="Font">
+              <option value="">Default font</option>
+              <option value="sans">Sans</option>
+              <option value="serif">Serif</option>
+              <option value="mono">Mono</option>
+              <option value="casual">Casual</option>
+            </select>
+            <select id="size-select" class="style-select" aria-label="Font size">
+              <option value="">Size</option>
+              <option value="13">13</option>
+              <option value="15">15</option>
+              <option value="17">17</option>
+              <option value="20">20</option>
+              <option value="24">24</option>
+            </select>
+            <select id="spacing-select" class="style-select" aria-label="Line spacing">
+              <option value="">Spacing</option>
+              <option value="1.3">Tight</option>
+              <option value="1.45">Normal</option>
+              <option value="1.8">Relaxed</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="style-close" class="btn primary">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Attachment crop / zoom / rotate editor -->
+    <div id="img-editor" class="modal" hidden>
+      <div class="modal-card editor-card">
+        <p class="modal-title">Edit image</p>
+        <div class="editor-stage">
+          <canvas id="editor-canvas" width="288" height="216"></canvas>
+        </div>
+        <div class="editor-controls">
+          <label class="editor-zoom-ctl">
+            <span class="style-label">Zoom</span>
+            <input id="editor-zoom" type="range" min="100" max="400" value="100" aria-label="Zoom" />
+          </label>
+          <button id="editor-rotate" class="btn">Rotate 90&deg;</button>
+        </div>
+        <div class="modal-actions">
+          <button id="editor-save" class="btn primary">Save</button>
+          <button id="editor-cancel" class="btn">Cancel</button>
         </div>
       </div>
     </div>

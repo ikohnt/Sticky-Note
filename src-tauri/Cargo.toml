@@ -1,6 +1,6 @@
 [package]
 name = "sticky-notes"
-version = "0.2.0"
+version = "0.3.0"
 description = "A lightweight desktop sticky notes app built with Tauri."
 authors = ["Hendriko"]
 edition = "2021"

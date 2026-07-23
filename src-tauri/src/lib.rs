@@ -22,7 +22,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine as _;
 
 use note_store::similarity::{self, Cluster, Match};
-use note_store::{Clip, Note, NoteStore};
+use note_store::{Clip, Note, NoteStore, Palette};
 
 /// File name (inside the OS app-data directory) that notes are persisted to.
 const NOTES_FILE: &str = "notes.json";
@@ -35,7 +35,7 @@ const HUB_LABEL: &str = "hub";
 /// defaults rather than a big memory win: `--process-per-site` keeps that sharing
 /// explicit and the V8 heap cap bounds each renderer. The disable-features list
 /// preserves Tauri's default (dropping it would re-enable those features).
-const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --process-per-site --js-flags=--max-old-space-size=48";
+const WEBVIEW_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,Translate,OptimizationHints,AudioServiceOutOfProcess,MediaRouter,BackForwardCache --process-per-site --js-flags=--max-old-space-size=48 --disable-background-networking";
 /// Similarity threshold above which two notes are treated as near-duplicates.
 const DUPLICATE_THRESHOLD: f64 = 0.35;
 /// Similarity threshold for grouping notes in Smart Organization.
@@ -95,6 +95,7 @@ fn open_note_window(app: &AppHandle, note: &Note) -> tauri::Result<()> {
             .decorations(false)
             .resizable(true)
             .skip_taskbar(true)
+            .always_on_top(note.pinned)
             .additional_browser_args(WEBVIEW_ARGS)
             .build();
     })
@@ -248,6 +249,26 @@ fn get_note(id: String, state: tauri::State<AppState>) -> Result<Option<Note>, S
     Ok(store.get(&id).cloned())
 }
 
+/// Everything a note window needs at boot, in a single IPC round-trip.
+#[derive(serde::Serialize)]
+struct NoteBootstrap {
+    note: Option<Note>,
+    locked: bool,
+    has_master: bool,
+}
+
+/// One-shot boot payload for a note window — replaces the separate
+/// `is_locked` + `get_note` (+ `has_master`) calls.
+#[tauri::command]
+fn note_bootstrap(id: String, state: tauri::State<AppState>) -> Result<NoteBootstrap, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    Ok(NoteBootstrap {
+        note: store.get(&id).cloned(),
+        locked: store.is_locked(),
+        has_master: store.has_master(),
+    })
+}
+
 /// Return every note (ordered by creation).
 #[tauri::command]
 fn list_notes(state: tauri::State<AppState>) -> Result<Vec<Note>, String> {
@@ -303,41 +324,147 @@ fn update_note_geometry(
         .map_err(|e| e.to_string())
 }
 
-/// Delete a note, remove its attachment files, and close its window. If the note
-/// was in a clip that now has fewer than two members, the clip is dissolved.
-/// Async because dissolving may reopen the freed member's window.
+/// Best-effort removal of a note's sidecar attachment files (used on permanent
+/// deletion — soft delete keeps them so a restore is complete).
+fn cleanup_attachments(app: &AppHandle, note: &Note) {
+    if note.attachments.is_empty() && note.bg_image.is_none() {
+        return;
+    }
+    if let Ok(dir) = attachments_dir(app) {
+        for file in &note.attachments {
+            let _ = fs::remove_file(dir.join(file));
+        }
+        if let Some(bg) = &note.bg_image {
+            let _ = fs::remove_file(dir.join(bg));
+        }
+    }
+}
+
+/// Move a note to the trash (recoverable) and close its window. If it was in a
+/// clip that now has fewer than two live members, the clip is dissolved.
+/// Attachment files are kept until the note is purged. Async because dissolving
+/// may reopen the freed member's window.
 #[tauri::command]
 async fn delete_note(app: AppHandle, id: String) -> Result<(), String> {
-    let (removed, dissolved_clip) = {
+    let dissolved_clip = {
         let state = app.state::<AppState>();
         let mut store = state.store.lock().map_err(|e| e.to_string())?;
-        let removed = store.delete(&id).map_err(|e| e.to_string())?;
-        let dissolved = match &removed.group_id {
+        let removed = store.delete(&id).map_err(|e| e.to_string())?; // soft-delete → trash
+        match &removed.group_id {
             Some(cid) if store.clip_notes(cid).len() < 2 => {
                 store.delete_clip(cid).map_err(|e| e.to_string())?;
                 Some(cid.clone())
             }
             _ => None,
-        };
-        (removed, dissolved)
-    };
-    // Best-effort cleanup of the note's sidecar attachment files.
-    if !removed.attachments.is_empty() {
-        if let Ok(dir) = attachments_dir(&app) {
-            for file in &removed.attachments {
-                let _ = fs::remove_file(dir.join(file));
-            }
         }
-    }
+    };
     close_note_window(&app, &id);
     if let Some(cid) = dissolved_clip {
         if let Some(win) = app.get_webview_window(&clip_window_label(&cid)) {
             let _ = win.close();
         }
-        open_all_windows(&app); // reopen the now-standalone last member(s)
+        open_all_windows(&app);
     }
     let _ = app.emit("clips-changed", ());
+    let _ = app.emit("notes-changed", ());
     Ok(())
+}
+
+/// Restore a trashed note and reopen its window.
+#[tauri::command]
+async fn restore_note(app: AppHandle, id: String) -> Result<(), String> {
+    let note = {
+        let state = app.state::<AppState>();
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store.restore(&id).map_err(|e| e.to_string())?;
+        store.get(&id).cloned()
+    };
+    if let Some(note) = note {
+        // If its old clip dissolved while it was trashed, it comes back standalone.
+        if note.group_id.is_none() {
+            open_note_window(&app, &note).map_err(|e| e.to_string())?;
+        }
+    }
+    let _ = app.emit("notes-changed", ());
+    Ok(())
+}
+
+/// All trashed notes (for the Library's Trash section).
+#[tauri::command]
+fn list_trash(state: tauri::State<AppState>) -> Result<Vec<Note>, String> {
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    Ok(store.trash())
+}
+
+/// Permanently delete one trashed note and its attachment files.
+#[tauri::command]
+fn purge_note(app: AppHandle, id: String, state: tauri::State<AppState>) -> Result<(), String> {
+    let removed = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store.purge(&id).map_err(|e| e.to_string())?
+    };
+    cleanup_attachments(&app, &removed);
+    let _ = app.emit("notes-changed", ());
+    Ok(())
+}
+
+/// Empty the whole trash and clean up every purged note's attachment files.
+#[tauri::command]
+fn empty_trash(app: AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    let removed = {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store.empty_trash().map_err(|e| e.to_string())?
+    };
+    for note in &removed {
+        cleanup_attachments(&app, note);
+    }
+    let _ = app.emit("notes-changed", ());
+    Ok(())
+}
+
+/// Pin or unpin a note (always-on-top).
+#[tauri::command]
+fn set_note_pinned(
+    app: AppHandle,
+    id: String,
+    pinned: bool,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    {
+        let mut store = state.store.lock().map_err(|e| e.to_string())?;
+        store.set_pinned(&id, pinned).map_err(|e| e.to_string())?;
+    }
+    if let Some(win) = app.get_webview_window(&window_label(&id)) {
+        let _ = win.set_always_on_top(pinned);
+    }
+    Ok(())
+}
+
+/// Export all live, unprotected notes to a Markdown file at `path` (chosen by the
+/// frontend's save dialog).
+#[tauri::command]
+fn export_notes_to(path: String, state: tauri::State<AppState>) -> Result<usize, String> {
+    let notes = {
+        let store = state.store.lock().map_err(|e| e.to_string())?;
+        store.all()
+    };
+    let mut md = String::from("# Sticky Notes export\n\n");
+    let mut count = 0usize;
+    for n in &notes {
+        if n.protected {
+            continue; // never write encrypted/locked content out in the clear
+        }
+        let title = n
+            .content
+            .lines()
+            .map(|l| l.trim())
+            .find(|l| !l.is_empty())
+            .unwrap_or("(empty note)");
+        md.push_str(&format!("## {title}\n\n{}\n\n---\n\n", n.content));
+        count += 1;
+    }
+    fs::write(&path, md).map_err(|e| e.to_string())?;
+    Ok(count)
 }
 
 /// Persist a note's window opacity (clamped to a legible range in the store).
@@ -395,33 +522,6 @@ fn set_window_opacity(window: tauri::WebviewWindow, opacity: f64) -> Result<(), 
     #[cfg(not(windows))]
     {
         let _ = (window, opacity);
-    }
-    Ok(())
-}
-
-/// Assign a note to a group, or clear it with `null`.
-#[tauri::command]
-fn update_note_group(
-    id: String,
-    group_id: Option<String>,
-    state: tauri::State<AppState>,
-) -> Result<(), String> {
-    let mut store = state.store.lock().map_err(|e| e.to_string())?;
-    store.set_group(&id, group_id).map_err(|e| e.to_string())
-}
-
-/// Assign many notes to a group at once (Smart Organization's "accept").
-#[tauri::command]
-fn assign_group(
-    note_ids: Vec<String>,
-    group_id: Option<String>,
-    state: tauri::State<AppState>,
-) -> Result<(), String> {
-    let mut store = state.store.lock().map_err(|e| e.to_string())?;
-    for id in &note_ids {
-        store
-            .set_group(id, group_id.clone())
-            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -821,6 +921,122 @@ fn read_attachment(
 }
 
 // ---------------------------------------------------------------------------
+// Appearance: custom palette (from an image), background image, typography
+// ---------------------------------------------------------------------------
+
+/// Read any image file the user picked (via the dialog) as a `data:` URL so the
+/// frontend can analyse it on a canvas. Does not store anything.
+#[tauri::command]
+fn read_image_data(source_path: String) -> Result<String, String> {
+    let bytes = fs::read(&source_path).map_err(|e| e.to_string())?;
+    Ok(format!(
+        "data:{};base64,{}",
+        mime_for(&source_path),
+        BASE64.encode(bytes)
+    ))
+}
+
+/// Copy a picked image into the note's data dir as its background, replacing any
+/// previous one. Returns the stored file name (sealed at rest if protected).
+#[tauri::command]
+fn set_background_image(
+    app: AppHandle,
+    id: String,
+    source_path: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let src = PathBuf::from(&source_path);
+    let ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("png")
+        .to_lowercase();
+    let raw = fs::read(&src).map_err(|e| e.to_string())?;
+    let file_name = format!("{id}-bg-{}.{ext}", now_ms());
+
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let protected = store.get(&id).map(|n| n.protected).unwrap_or(false);
+    // Remove any previous background file for this note.
+    if let Some(old) = store.get(&id).and_then(|n| n.bg_image.clone()) {
+        if let Ok(dir) = attachments_dir(&app) {
+            let _ = fs::remove_file(dir.join(old));
+        }
+    }
+    let data = if protected {
+        store.encrypt_bytes(&raw).map_err(|e| e.to_string())?
+    } else {
+        raw
+    };
+    let dest = attachments_dir(&app)?.join(&file_name);
+    fs::write(&dest, &data).map_err(|e| e.to_string())?;
+    Ok(file_name)
+}
+
+/// Persist a note's custom palette + background image (both `null` reverts to the
+/// preset colour). Deletes the old background file when it changes/clears.
+#[tauri::command]
+fn set_note_palette(
+    app: AppHandle,
+    id: String,
+    palette: Option<Palette>,
+    bg_image: Option<String>,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    let old = store.get(&id).and_then(|n| n.bg_image.clone());
+    if old != bg_image {
+        if let (Some(old_file), Ok(dir)) = (old, attachments_dir(&app)) {
+            let _ = fs::remove_file(dir.join(old_file));
+        }
+    }
+    store
+        .set_palette(&id, palette, bg_image)
+        .map_err(|e| e.to_string())
+}
+
+/// Persist a note's typography (font family / size / line-height; `null` = default).
+#[tauri::command]
+fn set_note_typography(
+    id: String,
+    font: Option<String>,
+    font_size: Option<u32>,
+    line_height: Option<f64>,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let mut store = state.store.lock().map_err(|e| e.to_string())?;
+    store
+        .set_typography(&id, font, font_size, line_height)
+        .map_err(|e| e.to_string())
+}
+
+/// Overwrite an attachment file with an edited version (a `data:` URL from the
+/// crop/zoom editor). Re-sealed at rest if the note is protected.
+#[tauri::command]
+fn save_edited_attachment(
+    app: AppHandle,
+    id: String,
+    file: String,
+    data_url: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let b64 = data_url
+        .split(',')
+        .nth(1)
+        .ok_or_else(|| "malformed data URL".to_string())?;
+    let bytes = BASE64.decode(b64).map_err(|e| e.to_string())?;
+    let store = state.store.lock().map_err(|e| e.to_string())?;
+    let protected = store.get(&id).map(|n| n.protected).unwrap_or(false);
+    let data = if protected {
+        store.encrypt_bytes(&bytes).map_err(|e| e.to_string())?
+    } else {
+        bytes
+    };
+    let dest = attachments_dir(&app)?.join(&file);
+    fs::write(&dest, &data).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Password protection
 // ---------------------------------------------------------------------------
 
@@ -1069,6 +1285,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             get_note,
+            note_bootstrap,
             list_notes,
             create_note,
             update_note_content,
@@ -1076,8 +1293,6 @@ pub fn run() {
             update_note_geometry,
             update_note_opacity,
             set_window_opacity,
-            update_note_group,
-            assign_group,
             list_clips,
             get_clip,
             clip_notes,
@@ -1089,6 +1304,12 @@ pub fn run() {
             unclip_note,
             unclip_all,
             delete_note,
+            restore_note,
+            list_trash,
+            purge_note,
+            empty_trash,
+            set_note_pinned,
+            export_notes_to,
             focus_note,
             open_hub,
             surprise_me,
@@ -1098,6 +1319,11 @@ pub fn run() {
             attach_image,
             remove_attachment,
             read_attachment,
+            read_image_data,
+            set_background_image,
+            set_note_palette,
+            set_note_typography,
+            save_edited_attachment,
             has_master,
             is_locked,
             set_master_password,

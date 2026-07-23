@@ -51,7 +51,8 @@ pub struct Cluster {
 /// Whether a note may take part in any library analysis (Decisions 4 & 6):
 /// it must be neither protected nor effectively empty.
 pub fn is_analyzable(note: &Note) -> bool {
-    !note.protected && !note.content.trim().is_empty()
+    // Strip HTML first so a rich-but-textless note (e.g. just "<br>") counts as empty.
+    !note.protected && !plain_text(&note.content).trim().is_empty()
 }
 
 /// Split text into lowercased, meaningful tokens (drops punctuation, short words
@@ -62,6 +63,104 @@ pub fn tokenize(text: &str) -> Vec<String> {
         .map(|w| w.to_lowercase())
         .filter(|w| !STOPWORDS.contains(&w.as_str()))
         .collect()
+}
+
+/// Tag names that become a line break when stripped, so `snippet`'s first line
+/// and word boundaries survive HTML removal.
+fn is_block_tag(name: &str) -> bool {
+    matches!(
+        name,
+        "br" | "div" | "p" | "li" | "ul" | "ol" | "tr" | "table" | "hr" | "blockquote"
+            | "h1" | "h2" | "h3" | "h4" | "h5" | "h6"
+    )
+}
+
+/// Decode the handful of HTML entities the editor emits.
+fn decode_entity(ent: &str) -> String {
+    match ent {
+        "lt" => "<".to_string(),
+        "gt" => ">".to_string(),
+        "amp" => "&".to_string(),
+        "quot" => "\"".to_string(),
+        "apos" => "'".to_string(),
+        "nbsp" => " ".to_string(),
+        _ => {
+            if let Some(num) = ent.strip_prefix('#') {
+                let code = num
+                    .strip_prefix(|c| c == 'x' || c == 'X')
+                    .and_then(|h| u32::from_str_radix(h, 16).ok())
+                    .or_else(|| num.parse::<u32>().ok());
+                if let Some(ch) = code.and_then(char::from_u32) {
+                    return ch.to_string();
+                }
+            }
+            format!("&{};", ent) // unknown entity: leave it as-is
+        }
+    }
+}
+
+/// Strip HTML tags and decode entities so the offline analysis (tokenizing,
+/// snippets, emptiness checks) sees plain text — note content is stored as HTML
+/// now. Block tags collapse to newlines; inline tags are removed without a gap.
+pub fn plain_text(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut chars = html.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '<' => match chars.peek() {
+                // Looks like a tag: consume up to '>' and note block boundaries.
+                Some(&d) if d.is_ascii_alphabetic() || d == '/' || d == '!' => {
+                    let mut name = String::new();
+                    let mut reading_name = true;
+                    for e in chars.by_ref() {
+                        if e == '>' {
+                            break;
+                        }
+                        if reading_name {
+                            if e == '/' && name.is_empty() {
+                                continue;
+                            }
+                            if e.is_ascii_alphanumeric() {
+                                name.push(e.to_ascii_lowercase());
+                            } else {
+                                reading_name = false; // reached attributes / space
+                            }
+                        }
+                    }
+                    if is_block_tag(&name) && !out.ends_with('\n') {
+                        out.push('\n');
+                    }
+                }
+                // A stray '<' (e.g. "a < b" in a legacy note): keep it literal.
+                _ => out.push('<'),
+            },
+            '&' => {
+                let mut ent = String::new();
+                let mut terminated = false;
+                while let Some(&d) = chars.peek() {
+                    if d == ';' {
+                        chars.next();
+                        terminated = true;
+                        break;
+                    }
+                    if (d.is_ascii_alphanumeric() || d == '#') && ent.len() < 12 {
+                        ent.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if terminated && !ent.is_empty() {
+                    out.push_str(&decode_entity(&ent));
+                } else {
+                    out.push('&'); // not a real entity: keep what we consumed
+                    out.push_str(&ent);
+                }
+            }
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 /// Term-frequency map for a token list.
@@ -124,7 +223,10 @@ struct Analyzed {
 impl Analyzed {
     fn build(notes: &[Note]) -> Self {
         let analyzable: Vec<&Note> = notes.iter().filter(|n| is_analyzable(n)).collect();
-        let docs: Vec<Vec<String>> = analyzable.iter().map(|n| tokenize(&n.content)).collect();
+        let docs: Vec<Vec<String>> = analyzable
+            .iter()
+            .map(|n| tokenize(&plain_text(&n.content)))
+            .collect();
         let idf = idf(&docs);
         let vectors: Vec<HashMap<String, f64>> =
             docs.iter().map(|d| tfidf(&term_freq(d), &idf)).collect();
@@ -287,7 +389,7 @@ pub fn surprise_message(notes: &[Note], hour: u32, pick: u64) -> String {
             .iter()
             .min_by_key(|n| n.updated_at)
             .expect("non-empty");
-        let snippet = snippet(&oldest.content, 40);
+        let snippet = snippet(&plain_text(&oldest.content), 40);
         match pick % 3 {
             0 => format!(
                 "You have {} notes going. Maybe revisit \u{201c}{}\u{201d} — it's been waiting a while.",
@@ -341,6 +443,13 @@ mod tests {
             group_id: None,
             protected: false,
             attachments: Vec::new(),
+            palette: None,
+            bg_image: None,
+            font: None,
+            font_size: None,
+            line_height: None,
+            pinned: false,
+            deleted_at: None,
             enc: None,
         }
     }
@@ -354,6 +463,26 @@ mod tests {
         assert!(!toks.contains(&"the".to_string()));
         assert!(!toks.contains(&"is".to_string()));
         assert!(!toks.contains(&"it".to_string()));
+    }
+
+    #[test]
+    fn plain_text_strips_tags_and_decodes_entities() {
+        // Tags removed; block tags separate lines so the first line is right.
+        assert_eq!(plain_text("<div>Buy <b>milk</b></div>").trim(), "Buy milk");
+        // Entities decoded, including a stray '<' kept literal in legacy text.
+        assert_eq!(plain_text("a &amp; b &lt;3").trim(), "a & b <3");
+        assert_eq!(plain_text("if i < j").trim(), "if i < j");
+        // No tag names leak into the tokens.
+        let toks = tokenize(&plain_text("<div>grocery</div><div>list</div>"));
+        assert!(toks.contains(&"grocery".to_string()));
+        assert!(!toks.iter().any(|t| t == "div"));
+    }
+
+    #[test]
+    fn html_only_note_is_not_analyzable() {
+        // A rich-but-textless note (just a line break) counts as empty.
+        assert!(!is_analyzable(&note("n1", "<div><br></div>")));
+        assert!(is_analyzable(&note("n2", "<div>real text here</div>")));
     }
 
     #[test]

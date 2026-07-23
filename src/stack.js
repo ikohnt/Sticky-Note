@@ -19,8 +19,15 @@ const posEl = document.getElementById("clip-pos");
 const COLORS = ["yellow", "pink", "blue", "green", "purple"];
 function applyColor(color) {
   const chosen = COLORS.includes(color) ? color : "yellow";
-  body.className = "color-" + chosen + " stack";
+  const dark = localStorage.getItem("theme") === "dark" ? " dark" : "";
+  body.className = "color-" + chosen + " stack" + dark;
 }
+window.addEventListener("storage", (e) => {
+  if (e.key === "theme") {
+    const n = current();
+    applyColor(n ? n.color : "yellow");
+  }
+});
 function debounce(fn, ms) {
   let t;
   return (...a) => {

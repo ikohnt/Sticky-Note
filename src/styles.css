@@ -14,6 +14,13 @@
 .color-green  { --note: #d8f5df; --header: #7bd88f; --ink: #14512a; }
 .color-purple { --note: #ece0ff; --header: #c19bff; --ink: #35205a; }
 
+/* Dark theme — same colour identity, dark surface + light ink. `body.dark`. */
+.dark.color-yellow { --note: #38330f; --header: #4a4212; --ink: #f4edc4; }
+.dark.color-pink   { --note: #3a1622; --header: #4d1e2e; --ink: #ffd3de; }
+.dark.color-blue   { --note: #102739; --header: #16324a; --ink: #cfe6ff; }
+.dark.color-green  { --note: #12301f; --header: #163d29; --ink: #cdf0d7; }
+.dark.color-purple { --note: #241740; --header: #2d1f57; --ink: #e6d8ff; }
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -34,6 +41,8 @@ body {
   font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--ink);
   user-select: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 .toolbar {
@@ -45,6 +54,7 @@ body {
   background: var(--header);
   cursor: grab;
   flex: 0 0 auto;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--ink) 9%, transparent);
 }
 .toolbar:active { cursor: grabbing; }
 
@@ -94,13 +104,13 @@ body {
 }
 .icon-btn:hover { background: rgba(255, 255, 255, 0.7); }
 .icon-btn.danger:hover { background: rgba(220, 40, 40, 0.85); color: #fff; }
+.icon-btn svg { display: block; margin: auto; width: 14px; height: 14px; }
 
 #content {
   flex: 1 1 auto;
   width: 100%;
   border: none;
   outline: none;
-  resize: none;
   padding: 12px 14px;
   background: transparent;
   color: var(--ink);
@@ -108,8 +118,51 @@ body {
   line-height: 1.45;
   font-family: inherit;
   user-select: text;
+  overflow-y: auto;
+  white-space: pre-wrap;   /* preserve legacy plain-text newlines */
+  overflow-wrap: break-word;
 }
-#content::placeholder { color: color-mix(in srgb, var(--ink) 45%, transparent); }
+/* Placeholder for the empty contenteditable. */
+#content:empty::before {
+  content: attr(data-placeholder);
+  color: color-mix(in srgb, var(--ink) 45%, transparent);
+  pointer-events: none;
+}
+/* Live-rendered formatting inside the note. */
+#content h1 { font-size: 1.5em; font-weight: 700; margin: 0.2em 0; }
+#content h2 { font-size: 1.25em; font-weight: 700; margin: 0.2em 0; }
+#content h3 { font-size: 1.1em; font-weight: 600; margin: 0.2em 0; }
+#content ul, #content ol { margin: 0.2em 0; padding-left: 1.4em; }
+#content li { margin: 0.1em 0; }
+/* Checklist items (a tick box + text on one line). The box is a span, not an
+   <input> — form controls aren't reliably clickable inside contenteditable. */
+#content .task { display: flex; align-items: flex-start; gap: 7px; }
+#content .task-box {
+  flex: 0 0 auto;
+  display: inline-block;
+  position: relative;
+  width: 13px;
+  height: 13px;
+  margin-top: 0.28em;
+  border: 1.6px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.65;
+  cursor: pointer;
+  user-select: none;
+}
+#content .task-box:hover { opacity: 0.9; }
+#content .task-box[data-checked="true"] { opacity: 1; }
+#content .task-box[data-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 3.5px;
+  top: 0.5px;
+  width: 4px;
+  height: 7px;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
 
 /* Bottom-right resize grip for the frameless window. */
 #resize-handle {
@@ -138,19 +191,6 @@ body {
 
 /* Body opacity is driven inline by Focus Mode + the slider; ease the transition. */
 body { transition: opacity 0.18s ease, filter 0.18s ease; }
-
-/* ---- Group badge --------------------------------------------------------- */
-.group-badge {
-  flex: 0 0 auto;
-  margin: 4px 8px 0;
-  padding: 2px 8px;
-  align-self: flex-start;
-  border-radius: 10px;
-  font-size: 11px;
-  background: color-mix(in srgb, var(--ink) 14%, transparent);
-  color: var(--ink);
-  -webkit-app-region: no-drag;
-}
 
 /* ---- Attachments --------------------------------------------------------- */
 .attachments {
@@ -279,7 +319,9 @@ body { transition: opacity 0.18s ease, filter 0.18s ease; }
 .pw-input:focus { outline: 1px solid color-mix(in srgb, var(--ink) 55%, transparent); }
 .pw-error { color: #c0392b; font-size: 12px; margin-bottom: 8px; }
 
-/* ---- Frosted lock screen (protected + locked note) ----------------------- */
+/* ---- Lock screen (protected + locked note) ------------------------------- */
+/* Modelled on the Windows sign-in screen: the note's own surface is blurred
+   behind a centred login. The real text is encrypted and never rendered here. */
 .lock-screen {
   position: fixed;
   inset: 0;
@@ -288,52 +330,97 @@ body { transition: opacity 0.18s ease, filter 0.18s ease; }
   align-items: center;
   justify-content: center;
   overflow: hidden;
-  /* Frost the note behind it: whatever shows through is blurred + tinted. */
-  background: color-mix(in srgb, var(--note) 78%, transparent);
-  -webkit-backdrop-filter: blur(6px);
-  backdrop-filter: blur(6px);
+  background: rgba(15, 17, 23, 0.32);
+  -webkit-backdrop-filter: blur(20px) saturate(1.15);
+  backdrop-filter: blur(20px) saturate(1.15);
 }
 .lock-screen[hidden] { display: none; }
 
-/* Blurred faux "text" bars — reads as content you can't make out. */
-.lock-redact {
-  position: absolute;
-  inset: 0;
-  padding: 52px 18px 18px; /* clear the title bar */
+.lock-login {
   display: flex;
   flex-direction: column;
-  gap: 11px;
-  filter: blur(6px);
-  opacity: 0.45;
-  pointer-events: none;
-}
-.lock-redact span {
-  height: 12px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--ink) 55%, transparent);
-}
-.lock-redact span:nth-child(1) { width: 88%; }
-.lock-redact span:nth-child(2) { width: 66%; }
-.lock-redact span:nth-child(3) { width: 92%; }
-.lock-redact span:nth-child(4) { width: 54%; }
-.lock-redact span:nth-child(5) { width: 78%; }
-
-.lock-prompt {
-  position: relative;
-  z-index: 1;
-  max-width: 88%;
-  padding: 16px 16px 14px;
+  align-items: center;
   text-align: center;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--note) 88%, #fff 12%);
-  border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent);
-  box-shadow: 0 8px 22px var(--shadow);
+  padding: 24px;
+  color: var(--ink);
   -webkit-app-region: no-drag;
 }
-.lock-emoji { font-size: 26px; line-height: 1; margin-bottom: 6px; }
-.lock-title { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
-.lock-prompt .pw-input { margin-bottom: 8px; }
-.lock-prompt .btn { width: 100%; }
+.lock-avatar {
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink) 24%, transparent);
+  box-shadow: 0 4px 14px -6px var(--shadow);
+}
+.lock-avatar svg { width: 34px; height: 34px; opacity: 0.85; }
+.lock-name {
+  margin-top: 14px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.lock-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.66;
+}
+.lock-input-row {
+  position: relative;
+  margin-top: 16px;
+}
+.lock-pin {
+  width: 216px;
+  padding: 9px 38px 9px 16px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
+  background: color-mix(in srgb, var(--note) 78%, #fff 12%);
+  color: var(--ink);
+  font-size: 13px;
+  text-align: center;
+  outline: none;
+}
+.lock-pin:focus {
+  border-color: color-mix(in srgb, var(--ink) 55%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.lock-go {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+  opacity: 0.7;
+  cursor: pointer;
+  transition: opacity 0.12s ease, background 0.12s ease;
+}
+.lock-go svg { width: 16px; height: 16px; }
+.lock-go:hover {
+  opacity: 1;
+  background: color-mix(in srgb, var(--ink) 12%, transparent);
+}
+.lock-err {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #e06d6d;
+}
+.lock-hint {
+  margin-top: 12px;
+  font-size: 11px;
+  opacity: 0.55;
+  max-width: 220px;
+}
 
 /* ---- Clip stack window --------------------------------------------------- */
 /* The window background is the "pages underneath"; the top note sits on a card
@@ -393,3 +480,162 @@ body.stack {
   font-size: 11px;
   color: color-mix(in srgb, var(--ink) 60%, transparent);
 }
+
+/* ---- Pin (active) -------------------------------------------------------- */
+.icon-btn.active {
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--ink) 40%, transparent);
+}
+
+/* ---- Right-click context menu -------------------------------------------- */
+.ctx-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 184px;
+  padding: 5px;
+  border-radius: 11px;
+  background: var(--note);
+  border: 1px solid color-mix(in srgb, var(--ink) 16%, transparent);
+  box-shadow: 0 14px 38px -10px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.12);
+}
+.ctx-menu[hidden] { display: none; }
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.ctx-item .ci { display: inline-flex; flex: 0 0 auto; opacity: 0.75; }
+.ctx-item .ci svg { width: 15px; height: 15px; }
+.ctx-item:hover { background: color-mix(in srgb, var(--ink) 12%, transparent); }
+.ctx-item.danger:hover { background: rgba(220, 40, 40, 0.9); color: #fff; }
+.ctx-item.danger:hover .ci { opacity: 1; }
+
+/* ---- First-run tip ------------------------------------------------------- */
+.onboard-tip {
+  flex: 0 0 auto;
+  margin: 6px 8px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  font-size: 11px;
+  line-height: 1.45;
+  -webkit-app-region: no-drag;
+}
+.onboard-tip p { margin-bottom: 6px; }
+.onboard-tip .btn { padding: 3px 10px; font-size: 11px; }
+
+/* ---- Background image (with a readable scrim over the text) --------------- */
+body.has-bg {
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+}
+body.has-bg .toolbar {
+  background: color-mix(in srgb, var(--header) 80%, transparent);
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+body.has-bg #content {
+  background: color-mix(in srgb, var(--note) 74%, transparent);
+}
+body.has-bg .statusbar {
+  background: color-mix(in srgb, var(--note) 55%, transparent);
+}
+
+/* ---- Style & background panel -------------------------------------------- */
+.style-card { max-width: 300px; }
+.style-section { margin-bottom: 12px; }
+.style-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.7;
+  margin-bottom: 6px;
+}
+.preset-row { display: flex; flex-wrap: wrap; gap: 7px; }
+.preset {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent);
+  cursor: pointer;
+  padding: 0;
+  -webkit-app-region: no-drag;
+  transition: transform 0.08s ease;
+}
+.preset:hover { transform: scale(1.09); }
+.style-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+.style-row { display: flex; gap: 6px; }
+.style-select {
+  -webkit-app-region: no-drag;
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--ink) 30%, transparent);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.5);
+  color: var(--ink);
+  font-size: 12px;
+  padding: 5px 6px;
+}
+
+/* Attachment crop / zoom / rotate editor */
+.editor-card { max-width: 320px; }
+.editor-stage {
+  display: flex;
+  justify-content: center;
+  margin: 4px 0 12px;
+}
+#editor-canvas {
+  width: 288px;
+  height: 216px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--ink) 26%, transparent);
+  background:
+    repeating-conic-gradient(rgba(0, 0, 0, 0.06) 0% 25%, transparent 0% 50%) 50% / 16px 16px;
+  cursor: grab;
+  -webkit-app-region: no-drag;
+  touch-action: none;
+}
+.editor-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.editor-zoom-ctl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+.editor-zoom-ctl .style-label { margin-bottom: 0; }
+.editor-zoom-ctl input[type="range"] {
+  -webkit-app-region: no-drag;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Markdown-lite format bar (sits just below the toolbar) */
+.format-bar {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 3px;
+  padding: 5px 8px 0;
+}
+.format-bar[hidden] { display: none; }
+.fmt-btn {
+  width: 24px;
+  height: 22px;
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+.fmt-btn:hover { background: color-mix(in srgb, var(--ink) 15%, transparent); }

@@ -13,7 +13,13 @@
     </header>
 
     <section class="panel">
-      <button id="surprise-btn" class="hub-btn primary">✨ Surprise me</button>
+      <input id="search-input" class="search-input" type="search"
+             placeholder="Search notes…" aria-label="Search notes" />
+      <div id="search-results" class="search-results"></div>
+    </section>
+
+    <section class="panel">
+      <button id="surprise-btn" class="hub-btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3Z"/><path d="M18 14l.8 2.2L21 17l-2.2.8L18 20l-.8-2.2L15 17l2.2-.8L18 14Z"/></svg>Surprise me</button>
       <div id="surprise-out" class="surprise-out" hidden></div>
     </section>
 
@@ -40,6 +46,19 @@
         desktop tidy. Flip through them, or un-clip to fan them back out.
       </p>
       <div id="note-picker"></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Trash</h2>
+        <button id="empty-trash" class="hub-btn small" disabled>Empty trash</button>
+      </div>
+      <div id="trash-list"></div>
+      <p id="trash-empty" class="empty" hidden>Trash is empty.</p>
+    </section>
+
+    <section class="panel">
+      <button id="export-btn" class="hub-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg><span id="export-label">Export all notes to Markdown</span></button>
     </section>
 
     <script src="hub.js"></script>
