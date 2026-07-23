@@ -54,6 +54,18 @@ fn default_opacity() -> f64 {
     DEFAULT_OPACITY
 }
 
+/// A custom per-note colour palette (overrides the preset `color`), typically
+/// derived from a background image. Values are CSS colours (e.g. `"#33290f"`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Palette {
+    /// Note surface colour.
+    pub note: String,
+    /// Title-bar colour.
+    pub header: String,
+    /// Text colour.
+    pub ink: String,
+}
+
 /// A single sticky note and the geometry of its window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Note {
@@ -95,12 +107,40 @@ pub struct Note {
     /// File names (relative to the `attachments/` dir) of images on this note.
     #[serde(default)]
     pub attachments: Vec<String>,
+    /// Custom colour palette from a template/background image (overrides `color`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub palette: Option<Palette>,
+    /// Background image file (in `attachments/`) shown behind the note, if any.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bg_image: Option<String>,
+    /// Font family key for the text (e.g. `"sans"`, `"serif"`, `"mono"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font: Option<String>,
+    /// Font size in px for the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<u32>,
+    /// Line-height multiplier for the text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<f64>,
+    /// Whether the note stays above other windows (always-on-top).
+    #[serde(default)]
+    pub pinned: bool,
+    /// When the note was moved to trash (unix ms); `None` while it's live.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<u64>,
     /// Sealed content for a protected note when it is locked / stored at rest.
     /// Invariant: `enc.is_some()` iff `content` is *not* the plaintext (the note
     /// is locked); when unlocked in memory, `enc` is `None` and `content` is the
     /// decrypted text. Non-protected notes always have `enc == None`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enc: Option<crypto::Sealed>,
+}
+
+impl Note {
+    /// Whether the note is currently in the trash.
+    pub fn is_trashed(&self) -> bool {
+        self.deleted_at.is_some()
+    }
 }
 
 /// Default width/height for a clip's stack window.
@@ -248,25 +288,42 @@ impl NoteStore {
         &self.path
     }
 
-    /// Number of notes currently stored.
+    /// Number of live (non-trashed) notes.
     pub fn len(&self) -> usize {
-        self.notes.len()
+        self.notes.values().filter(|n| !n.is_trashed()).count()
     }
 
-    /// Whether the store holds no notes.
+    /// Whether the store holds no live notes.
     pub fn is_empty(&self) -> bool {
-        self.notes.is_empty()
+        self.len() == 0
     }
 
-    /// Borrow a single note by id.
+    /// Borrow a single note by id (live or trashed).
     pub fn get(&self, id: &str) -> Option<&Note> {
         self.notes.get(id)
     }
 
-    /// All notes, ordered by creation time (stable for window restore order).
+    /// All live notes, ordered by creation time (stable for window restore order).
     pub fn all(&self) -> Vec<Note> {
-        let mut list: Vec<Note> = self.notes.values().cloned().collect();
+        let mut list: Vec<Note> = self
+            .notes
+            .values()
+            .filter(|n| !n.is_trashed())
+            .cloned()
+            .collect();
         list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
+        list
+    }
+
+    /// All trashed notes, most-recently-deleted first.
+    pub fn trash(&self) -> Vec<Note> {
+        let mut list: Vec<Note> = self
+            .notes
+            .values()
+            .filter(|n| n.is_trashed())
+            .cloned()
+            .collect();
+        list.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at).then_with(|| a.id.cmp(&b.id)));
         list
     }
 
@@ -287,6 +344,13 @@ impl NoteStore {
             group_id: None,
             protected: false,
             attachments: Vec::new(),
+            palette: None,
+            bg_image: None,
+            font: None,
+            font_size: None,
+            line_height: None,
+            pinned: false,
+            deleted_at: None,
             enc: None,
         };
         self.notes.insert(note.id.clone(), note.clone());
@@ -363,6 +427,48 @@ impl NoteStore {
         self.save()
     }
 
+    /// Set (or clear) a note's custom palette and background image. Clearing both
+    /// reverts the note to its preset `color`.
+    pub fn set_palette(
+        &mut self,
+        id: &str,
+        palette: Option<Palette>,
+        bg_image: Option<String>,
+    ) -> Result<(), StoreError> {
+        {
+            let note = self
+                .notes
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            note.palette = palette;
+            note.bg_image = bg_image;
+            note.updated_at = now_ms();
+        }
+        self.save()
+    }
+
+    /// Set (or clear, with `None`) a note's typography. Any field left `None`
+    /// falls back to the app default in the frontend.
+    pub fn set_typography(
+        &mut self,
+        id: &str,
+        font: Option<String>,
+        font_size: Option<u32>,
+        line_height: Option<f64>,
+    ) -> Result<(), StoreError> {
+        {
+            let note = self
+                .notes
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            note.font = font;
+            note.font_size = font_size.map(|s| s.clamp(9, 48));
+            note.line_height = line_height.map(|h| h.clamp(1.0, 3.0));
+            note.updated_at = now_ms();
+        }
+        self.save()
+    }
+
     /// Assign the note to a group, or clear its group with `None`.
     pub fn set_group(&mut self, id: &str, group_id: Option<String>) -> Result<(), StoreError> {
         {
@@ -395,7 +501,7 @@ impl NoteStore {
         let mut list: Vec<Note> = self
             .notes
             .values()
-            .filter(|n| n.group_id.as_deref() == Some(clip_id))
+            .filter(|n| n.group_id.as_deref() == Some(clip_id) && !n.is_trashed())
             .cloned()
             .collect();
         list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
@@ -732,6 +838,33 @@ impl NoteStore {
     /// Delete a note. Returns [`StoreError::NotFound`] if it does not exist.
     /// Returns the deleted note so the caller can clean up its attachment files.
     pub fn delete(&mut self, id: &str) -> Result<Note, StoreError> {
+        {
+            let note = self
+                .notes
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            note.deleted_at = Some(now_ms());
+        }
+        self.save()?;
+        Ok(self.notes.get(id).cloned().expect("just soft-deleted"))
+    }
+
+    /// Restore a note from the trash.
+    pub fn restore(&mut self, id: &str) -> Result<(), StoreError> {
+        {
+            let note = self
+                .notes
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            note.deleted_at = None;
+            note.updated_at = now_ms();
+        }
+        self.save()
+    }
+
+    /// Permanently remove a note. Returns it so the caller can clean up its
+    /// attachment files.
+    pub fn purge(&mut self, id: &str) -> Result<Note, StoreError> {
         let removed = self
             .notes
             .remove(id)
@@ -740,12 +873,41 @@ impl NoteStore {
         Ok(removed)
     }
 
+    /// Permanently remove every trashed note. Returns them for attachment cleanup.
+    pub fn empty_trash(&mut self) -> Result<Vec<Note>, StoreError> {
+        let ids: Vec<String> = self
+            .notes
+            .values()
+            .filter(|n| n.is_trashed())
+            .map(|n| n.id.clone())
+            .collect();
+        let removed: Vec<Note> = ids.iter().filter_map(|id| self.notes.remove(id)).collect();
+        self.save()?;
+        Ok(removed)
+    }
+
+    /// Pin or unpin a note (always-on-top).
+    pub fn set_pinned(&mut self, id: &str, pinned: bool) -> Result<(), StoreError> {
+        {
+            let note = self
+                .notes
+                .get_mut(id)
+                .ok_or_else(|| StoreError::NotFound(id.to_string()))?;
+            note.pinned = pinned;
+            note.updated_at = now_ms();
+        }
+        self.save()
+    }
+
     /// Serialize all notes and write them to disk atomically.
     ///
     /// Writes to `<file>.tmp` and renames over the target so readers never see
     /// a partially written file.
     pub fn save(&self) -> Result<(), StoreError> {
-        let list = self.all();
+        // Persist *every* note, including trashed ones (so the trash survives a
+        // restart) — ordered stably for a clean diff.
+        let mut list: Vec<&Note> = self.notes.values().collect();
+        list.sort_by(|a, b| a.created_at.cmp(&b.created_at).then_with(|| a.id.cmp(&b.id)));
         // Seal protected notes so their plaintext is never written to disk.
         let persisted: Vec<Note> = list
             .iter()
@@ -896,6 +1058,38 @@ mod tests {
     }
 
     #[test]
+    fn palette_and_typography_persist_and_clamp() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let id = store.create(0.0, 0.0).unwrap().id;
+
+        let pal = Palette {
+            note: "#332a0f".into(),
+            header: "#4a4212".into(),
+            ink: "#f4edc4".into(),
+        };
+        store
+            .set_palette(&id, Some(pal.clone()), Some("bg-1.png".into()))
+            .unwrap();
+        store.set_typography(&id, Some("serif".into()), Some(99), Some(5.0)).unwrap();
+
+        let reloaded = store_in(dir.path());
+        let n = reloaded.get(&id).unwrap();
+        assert_eq!(n.palette.as_ref().unwrap().ink, "#f4edc4");
+        assert_eq!(n.bg_image.as_deref(), Some("bg-1.png"));
+        assert_eq!(n.font.as_deref(), Some("serif"));
+        assert_eq!(n.font_size, Some(48)); // clamped from 99
+        assert_eq!(n.line_height, Some(3.0)); // clamped from 5.0
+
+        // Clearing reverts to the preset colour + defaults.
+        let mut store = reloaded;
+        store.set_palette(&id, None, None).unwrap();
+        store.set_typography(&id, None, None, None).unwrap();
+        let n = store.get(&id).unwrap();
+        assert!(n.palette.is_none() && n.bg_image.is_none() && n.font.is_none());
+    }
+
+    #[test]
     fn opacity_persists_and_clamps_to_legible_range() {
         let dir = tempdir().unwrap();
         let mut store = store_in(dir.path());
@@ -1041,6 +1235,66 @@ mod tests {
         store.merge(&source, &target).unwrap();
         // Not duplicated into "same text\n\n---\n\nsame text".
         assert_eq!(store.get(&target).unwrap().content, "same text");
+    }
+
+    #[test]
+    fn delete_trashes_then_restore_and_purge() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let id = store.create(0.0, 0.0).unwrap().id;
+        store.set_content(&id, "keep me".into()).unwrap();
+
+        // Soft-delete: gone from live views, still recoverable from the trash.
+        store.delete(&id).unwrap();
+        assert_eq!(store.len(), 0);
+        assert!(store.all().is_empty());
+        assert_eq!(store.trash().len(), 1);
+        assert!(store.get(&id).unwrap().is_trashed());
+
+        // Survives a reload while trashed.
+        let mut reloaded = store_in(dir.path());
+        assert_eq!(reloaded.trash().len(), 1);
+
+        // Restore brings it back to life.
+        reloaded.restore(&id).unwrap();
+        assert_eq!(reloaded.len(), 1);
+        assert!(reloaded.trash().is_empty());
+        assert_eq!(reloaded.get(&id).unwrap().content, "keep me");
+
+        // Purge removes it for good.
+        reloaded.delete(&id).unwrap();
+        let removed = reloaded.purge(&id).unwrap();
+        assert_eq!(removed.id, id);
+        assert!(reloaded.get(&id).is_none());
+    }
+
+    #[test]
+    fn empty_trash_removes_only_trashed() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let keep = store.create(0.0, 0.0).unwrap().id;
+        let a = store.create(0.0, 0.0).unwrap().id;
+        let b = store.create(0.0, 0.0).unwrap().id;
+        store.delete(&a).unwrap();
+        store.delete(&b).unwrap();
+
+        let purged = store.empty_trash().unwrap();
+        assert_eq!(purged.len(), 2);
+        assert!(store.trash().is_empty());
+        assert_eq!(store.len(), 1);
+        assert!(store.get(&keep).is_some());
+    }
+
+    #[test]
+    fn pin_persists() {
+        let dir = tempdir().unwrap();
+        let mut store = store_in(dir.path());
+        let id = store.create(0.0, 0.0).unwrap().id;
+        store.set_pinned(&id, true).unwrap();
+        assert!(store.get(&id).unwrap().pinned);
+
+        let reloaded = store_in(dir.path());
+        assert!(reloaded.get(&id).unwrap().pinned);
     }
 
     #[test]

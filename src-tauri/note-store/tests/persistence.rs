@@ -35,10 +35,19 @@ fn full_lifecycle_survives_restart() {
         assert_eq!((n3.x, n3.y, n3.width, n3.height), (500.0, 220.0, 320.0, 300.0));
     }
 
-    // Third "session": delete one, confirm persistence.
+    // Third "session": delete one (soft-delete → trash), confirm persistence.
     {
         let mut store = NoteStore::load(&path).unwrap();
         store.delete(&id2).unwrap();
+    }
+    {
+        let mut store = NoteStore::load(&path).unwrap();
+        // Excluded from the live list, but recoverable from the trash.
+        assert_eq!(store.len(), 2);
+        assert!(store.get(&id2).unwrap().is_trashed());
+        assert_eq!(store.trash().len(), 1);
+        // Purging it makes the removal permanent across a reload.
+        store.purge(&id2).unwrap();
     }
     {
         let store = NoteStore::load(&path).unwrap();
