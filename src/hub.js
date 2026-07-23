@@ -3,6 +3,15 @@
 // Tauri API; everything runs locally in the Rust backend.
 
 const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const dialog = window.__TAURI__.dialog;
+
+const searchInput = document.getElementById("search-input");
+const searchResults = document.getElementById("search-results");
+const trashList = document.getElementById("trash-list");
+const trashEmpty = document.getElementById("trash-empty");
+const emptyTrashBtn = document.getElementById("empty-trash");
+const exportBtn = document.getElementById("export-btn");
 
 const surpriseBtn = document.getElementById("surprise-btn");
 const surpriseOut = document.getElementById("surprise-out");
@@ -158,7 +167,7 @@ function renderClusters(clusters) {
         row.innerHTML = "";
         const done = document.createElement("span");
         done.className = "filed-label";
-        done.textContent = "✓ Clipped into “" + name + "”";
+        done.textContent = "Clipped into " + name;
         row.appendChild(done);
         await refreshNotes();
       } catch (err) {
@@ -188,4 +197,109 @@ organizeBtn.addEventListener("click", async () => {
   }
 });
 
+// ---- Search ----------------------------------------------------------------
+function runSearch() {
+  const q = searchInput.value.trim().toLowerCase();
+  searchResults.innerHTML = "";
+  if (!q) return;
+  const hits = [...notesById.values()]
+    .filter((n) => (n.content || "").toLowerCase().includes(q))
+    .slice(0, 20);
+  if (hits.length === 0) {
+    searchResults.innerHTML = '<p class="empty">No matches.</p>';
+    return;
+  }
+  for (const n of hits) {
+    const row = document.createElement("button");
+    row.className = "result-row";
+    row.textContent = snippet(n.content, 70);
+    row.title = "Show this note";
+    row.addEventListener("click", () => {
+      invoke("focus_note", { id: n.id }).catch((err) => console.error("focus failed:", err));
+    });
+    searchResults.appendChild(row);
+  }
+}
+searchInput.addEventListener("input", runSearch);
+
+// ---- Trash -----------------------------------------------------------------
+async function refreshTrash() {
+  let trash = [];
+  try {
+    trash = await invoke("list_trash");
+  } catch (err) {
+    console.error("Failed to list trash:", err);
+  }
+  trashList.innerHTML = "";
+  emptyTrashBtn.disabled = trash.length === 0;
+  trashEmpty.hidden = trash.length !== 0;
+  for (const n of trash) {
+    const row = document.createElement("div");
+    row.className = "trash-row";
+    const text = document.createElement("span");
+    text.className = "trash-text";
+    text.textContent = snippet(n.content, 48);
+    const restore = document.createElement("button");
+    restore.className = "hub-btn small";
+    restore.textContent = "Restore";
+    restore.addEventListener("click", async () => {
+      try {
+        await invoke("restore_note", { id: n.id });
+      } catch (err) {
+        console.error("Restore failed:", err);
+      }
+    });
+    const purge = document.createElement("button");
+    purge.className = "hub-btn small danger";
+    purge.textContent = "Delete forever";
+    purge.addEventListener("click", async () => {
+      try {
+        await invoke("purge_note", { id: n.id });
+      } catch (err) {
+        console.error("Purge failed:", err);
+      }
+    });
+    row.appendChild(text);
+    row.appendChild(restore);
+    row.appendChild(purge);
+    trashList.appendChild(row);
+  }
+}
+emptyTrashBtn.addEventListener("click", async () => {
+  emptyTrashBtn.disabled = true;
+  try {
+    await invoke("empty_trash");
+  } catch (err) {
+    console.error("Empty trash failed:", err);
+    emptyTrashBtn.disabled = false;
+  }
+});
+
+// ---- Export ----------------------------------------------------------------
+exportBtn.addEventListener("click", async () => {
+  try {
+    const path = await dialog.save({
+      defaultPath: "sticky-notes.md",
+      filters: [{ name: "Markdown", extensions: ["md"] }],
+    });
+    if (!path) return;
+    const count = await invoke("export_notes_to", { path });
+    const label = document.getElementById("export-label");
+    label.textContent = `Exported ${count} notes`;
+    setTimeout(() => {
+      label.textContent = "Export all notes to Markdown";
+    }, 2500);
+  } catch (err) {
+    console.error("Export failed:", err);
+  }
+});
+
+// Keep everything fresh when notes are added/removed/restored anywhere.
+listen("notes-changed", () => {
+  refreshNotes();
+  refreshTrash();
+  runSearch();
+});
+
 refreshNotes();
+refreshTrash();

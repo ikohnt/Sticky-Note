@@ -74,6 +74,8 @@ body {
 }
 .hub-btn:hover { border-color: var(--accent); }
 .hub-btn:disabled { opacity: 0.5; cursor: default; }
+.hub-btn svg { width: 15px; height: 15px; vertical-align: -3px; margin-right: 7px; }
+.hub-btn.small svg { margin-right: 5px; }
 .hub-btn.small { font-size: 12px; padding: 5px 10px; }
 .hub-btn.primary {
   width: 100%;
@@ -155,3 +157,52 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ---- Search -------------------------------------------------------------- */
+.search-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 13px;
+  padding: 8px 10px;
+}
+.search-input:focus { outline: 1px solid var(--accent); }
+.search-results { margin-top: 6px; max-height: 200px; overflow-y: auto; }
+.result-row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.result-row:hover { background: var(--bg); }
+
+/* ---- Trash --------------------------------------------------------------- */
+#trash-list { max-height: 220px; overflow-y: auto; }
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 2px;
+}
+.trash-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hub-btn.danger { border-color: color-mix(in srgb, #c0392b 40%, var(--line)); }
+.hub-btn.danger:hover { border-color: #c0392b; color: #c0392b; }
